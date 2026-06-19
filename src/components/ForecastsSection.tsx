@@ -145,6 +145,7 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
     } else {
       const monthlyCost =
         att.subType === '8 حصص' ? 480 :
+        att.subType === '10 حصص' ? 600 :
         att.subType === '12 حصة' ? 720 :
         att.subType === '16 حصة' ? 960 : 1200;
       expectedCostToday += monthlyCost;

@@ -951,7 +951,7 @@ export const App: React.FC = () => {
         date: attendee.date,
         subType: attendee.subType,
         paid: attendee.paid,
-        cost: attendee.subType === 'حصة واحدة' ? 60 : (attendee.subType === '8 حصص' ? 480 : (attendee.subType === '12 حصة' ? 720 : (attendee.subType === '16 حصة' ? 960 : 1200))), // Default cost
+        cost: attendee.subType === 'حصة واحدة' ? 60 : (attendee.subType === '8 حصص' ? 480 : (attendee.subType === '10 حصص' ? 600 : (attendee.subType === '12 حصة' ? 720 : (attendee.subType === '16 حصة' ? 960 : 1200)))), // Default cost
         timestamp: Date.now(),
         desc: attendee.subType,
       };

@@ -113,11 +113,12 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     } else {
       let sessions = 0;
       if (subType === '8 حصص') sessions = 8;
+      else if (subType === '10 حصص') sessions = 10;
       else if (subType === '12 حصة') sessions = 12;
       else if (subType === '16 حصة') sessions = 16;
       else if (subType === '20 حصة') sessions = 20;
 
-      if (rawPaid >= 1500) {
+      if (rawPaid >= 1500 && subType !== '10 حصص') {
         if (sessions === 8) setCost(800);
         else if (sessions === 12) setCost(900);
         else if (sessions === 16) setCost(1000);
@@ -190,6 +191,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   const getAttendanceStats = (player: Player) => {
     const maxSessions =
       player.subType === '8 حصص' ? 8 :
+      player.subType === '10 حصص' ? 10 :
       player.subType === '12 حصة' ? 12 :
       player.subType === '16 حصة' ? 16 :
       player.subType === '20 حصة' ? 20 :
@@ -253,6 +255,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     const sessionNum = sessionIndex >= 0 ? sessionIndex + 1 : activeAtts.length;
     
     const maxSessions = player.subType === '8 حصص' ? 8 :
+                        player.subType === '10 حصص' ? 10 :
                         player.subType === '12 حصة' ? 12 :
                         player.subType === '16 حصة' ? 16 :
                         player.subType === '20 حصة' ? 20 : 0;
@@ -507,6 +510,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
               <option value="حضور فقط (مشترك شهرياً)">حضور فقط (مشترك شهرياً)</option>
               <option value="حصة واحدة">حصة واحدة (دفع يومي)</option>
               <option value="8 حصص">8 حصص في الشهر</option>
+              <option value="10 حصص">10 حصص في الشهر</option>
               <option value="12 حصة">12 حصة في الشهر</option>
               <option value="16 حصة">16 حصة في الشهر</option>
               <option value="20 حصة">20 حصة في الشهر</option>
@@ -600,6 +604,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                             <option value="حضور فقط (مشترك شهرياً)">حضور فقط (مشترك شهرياً)</option>
                             <option value="حصة واحدة">حصة واحدة (دفع يومي)</option>
                             <option value="8 حصص">8 حصص في الشهر</option>
+                            <option value="10 حصص">10 حصص في الشهر</option>
                             <option value="12 حصة">12 حصة في الشهر</option>
                             <option value="16 حصة">16 حصة في الشهر</option>
                             <option value="20 حصة">20 حصة في الشهر</option>
@@ -783,6 +788,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
           >
             <option value="حصة واحدة">حصة واحدة (دفع يومي)</option>
             <option value="8 حصص">8 حصص في الشهر</option>
+            <option value="10 حصص">10 حصص في الشهر</option>
             <option value="12 حصة">12 حصة في الشهر</option>
             <option value="16 حصة">16 حصة في الشهر</option>
             <option value="20 حصة">20 حصة في الشهر</option>
