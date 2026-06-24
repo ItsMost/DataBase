@@ -684,7 +684,7 @@ export const App: React.FC = () => {
   };
 
   // Group configurations handlers
-  const handleSaveGroupConfig = async (name: string, focusType: 'focus' | 'presence') => {
+  const handleSaveGroupConfig = async (name: string) => {
     let sys = await db.players.get('sys_groups_config');
     if (!sys) {
       sys = { id: 'sys_groups_config', isSystem: true, name: 'إعدادات الجروبات', history: [] };
@@ -693,16 +693,10 @@ export const App: React.FC = () => {
     const history = sys.history ? [...sys.history] : [];
     const existingIdx = history.findIndex(h => h.desc === name);
 
-    if (existingIdx > -1) {
-      history[existingIdx] = {
-        ...history[existingIdx],
-        subType: focusType,
-        timestamp: Date.now(),
-      };
-    } else {
+    if (existingIdx === -1) {
       history.push({
         desc: name,
-        subType: focusType,
+        subType: '',
         cost: 0,
         paid: 0,
         date: getTodayDate(),
@@ -713,7 +707,7 @@ export const App: React.FC = () => {
     await syncPlayerToCloud(updatedSys);
     const updatedList = await db.players.toArray();
     setPlayers(updatedList);
-    triggerToast("تم حفظ إعدادات الجروب بنجاح ✅");
+    triggerToast("تم إنشاء الجروب بنجاح ✅");
   };
 
   const handleDeleteGroupConfig = async (name: string) => {
@@ -883,6 +877,22 @@ export const App: React.FC = () => {
     const updatedList = await db.players.toArray();
     setPlayers(updatedList);
     triggerToast("تم تعديل اسم الجروب وتحديث اللاعبين بنجاح ✅");
+  };
+
+  // Move a player to a different group
+  const handleMovePlayerToGroup = async (playerId: string, groupName: string) => {
+    const p = await db.players.get(playerId);
+    if (!p) return;
+
+    const updatedPlayer: Player = {
+      ...p,
+      sport: groupName,
+      last_updated: Date.now(),
+    };
+    await syncPlayerToCloud(updatedPlayer);
+    const updatedList = await db.players.toArray();
+    setPlayers(updatedList);
+    triggerToast(`تم نقل اللاعب إلى جروب "${groupName}" بنجاح ✅`);
   };
 
   // Save Subscription Payment details
@@ -1961,6 +1971,7 @@ export const App: React.FC = () => {
                 onSaveGroupConfig={handleSaveGroupConfig}
                 onDeleteGroupConfig={handleDeleteGroupConfig}
                 onRenameGroupConfig={handleRenameGroupConfig}
+                onMovePlayerToGroup={handleMovePlayerToGroup}
               />
             )}
 
