@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { RosterSection } from './components/RosterSection';
 import { ActiveSection } from './components/ActiveSection';
-import { SportsSection } from './components/SportsSection';
+import { GroupsSection } from './components/GroupsSection';
 import { ProfileSection } from './components/ProfileSection';
 import { ForecastsSection } from './components/ForecastsSection';
 import {
@@ -204,7 +204,7 @@ const ExpectedSidebarWidget: React.FC<ExpectedSidebarWidgetProps> = ({
 export const App: React.FC = () => {
   // Global View states
   const [mode, setMode] = useState(localStorage.getItem('sys_mode') || 'dark');
-  const [activeTab, setActiveTab] = useState<'roster' | 'active' | 'sports' | 'profile' | 'forecasts'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'active' | 'groups' | 'profile' | 'forecasts'>('roster');
   const [syncStatus, setSyncStatus] = useState<'online' | 'offline' | 'syncing'>('offline');
   
   // Players database state
@@ -218,7 +218,7 @@ export const App: React.FC = () => {
   
   // Search & filters state
   const [searchQuery, setSearchQuery] = useState('');
-  const [sportFilter, setSportFilter] = useState('All');
+  const [groupFilter, setGroupFilter] = useState('All');
   const [dateFilter, setDateFilter] = useState('');
   
   // Roster / payment linking state
@@ -633,6 +633,51 @@ export const App: React.FC = () => {
     setWalletEntries(updated);
   };
 
+  // Group configurations handlers
+  const handleSaveGroupConfig = async (name: string, focusType: 'focus' | 'presence') => {
+    let sys = await db.players.get('sys_groups_config');
+    if (!sys) {
+      sys = { id: 'sys_groups_config', isSystem: true, name: 'إعدادات الجروبات', history: [] };
+    }
+
+    const history = sys.history ? [...sys.history] : [];
+    const existingIdx = history.findIndex(h => h.desc === name);
+
+    if (existingIdx > -1) {
+      history[existingIdx] = {
+        ...history[existingIdx],
+        subType: focusType,
+        timestamp: Date.now(),
+      };
+    } else {
+      history.push({
+        desc: name,
+        subType: focusType,
+        cost: 0,
+        paid: 0,
+        date: getTodayDate(),
+        timestamp: Date.now(),
+      });
+    }
+    const updatedSys = { ...sys, history };
+    await syncPlayerToCloud(updatedSys);
+    const updatedList = await db.players.toArray();
+    setPlayers(updatedList);
+    triggerToast("تم حفظ إعدادات الجروب بنجاح ✅");
+  };
+
+  const handleDeleteGroupConfig = async (name: string) => {
+    const sys = await db.players.get('sys_groups_config');
+    if (!sys || !sys.history) return;
+
+    const history = sys.history.filter(h => h.desc !== name);
+    const updatedSys = { ...sys, history };
+    await syncPlayerToCloud(updatedSys);
+    const updatedList = await db.players.toArray();
+    setPlayers(updatedList);
+    triggerToast("تم حذف الجروب بنجاح ✅", true);
+  };
+
   // Save Subscription Payment details
   const handleSaveSubscription = async (
     playerId: string,
@@ -926,7 +971,7 @@ export const App: React.FC = () => {
         id: newId,
         number: newNum,
         name: attendee.name,
-        sport: attendee.sport || 'General',
+        sport: attendee.sport || 'العام',
         attendance: [],
         history: [],
       };
@@ -1470,10 +1515,14 @@ export const App: React.FC = () => {
 
   const historyPlayer = players.find(x => x.id === historyPlayerId);
 
-  // Compute sport lists suggestions dynamically
-  const defaultSports = ['Volleyball', 'Basketball', 'Soccer', 'Squash', 'Swimming', 'General'];
-  const currentSports = players.filter(p => !p.isSystem).map(p => p.sport || 'General');
-  const allSports = [...new Set([...defaultSports, ...currentSports])];
+  // Compute group lists suggestions dynamically
+  const defaultGroups = ['جروب A', 'جروب B', 'العام'];
+  const currentGroups = players.filter(p => !p.isSystem).map(p => p.sport || 'العام');
+  const allGroups = [...new Set([...defaultGroups, ...currentGroups])];
+
+  // Load groups configurations
+  const groupsConfigPlayer = players.find(p => p.id === 'sys_groups_config');
+  const groupsConfig = groupsConfigPlayer?.history || [];
 
   return (
     <div className="max-w-md md:max-w-5xl lg:max-w-6xl xl:max-w-7xl mx-auto min-h-screen relative pb-28 md:pb-20 px-2 sm:px-4">
@@ -1511,15 +1560,15 @@ export const App: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('sports')}
+          onClick={() => setActiveTab('groups')}
           className={`flex flex-col items-center justify-center flex-1 py-1.5 transition-all ${
-            activeTab === 'sports' ? 'text-primary animate-pulse' : 'text-muted'
+            activeTab === 'groups' ? 'text-primary animate-pulse' : 'text-muted'
           }`}
         >
           <svg className="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5a3 3 0 10-3 3h3zm0-3c1.657 0 3 .895 3 2H9c0-1.105 1.343-2 3-2zM5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
           </svg>
-          <span className="text-[9px] font-bold">الرياضات</span>
+          <span className="text-[9px] font-bold">الجروبات</span>
         </button>
 
         <button
@@ -1593,12 +1642,12 @@ export const App: React.FC = () => {
               الاشتراكات
             </button>
             <button
-              onClick={() => setActiveTab('sports')}
+              onClick={() => setActiveTab('groups')}
               className={`w-1/5 py-2 text-center text-[10px] sm:text-xs transition-all rounded-lg ${
-                activeTab === 'sports' ? 'tab-active-segmented' : 'tab-inactive-segmented'
+                activeTab === 'groups' ? 'tab-active-segmented' : 'tab-inactive-segmented'
               }`}
             >
-              الرياضات 🏅
+              الجروبات 👥
             </button>
             <button
               onClick={() => setActiveTab('profile')}
@@ -1630,14 +1679,14 @@ export const App: React.FC = () => {
               />
               <div className="flex gap-2">
                 <select
-                  value={sportFilter}
-                  onChange={(e) => setSportFilter(e.target.value)}
+                  value={groupFilter}
+                  onChange={(e) => setGroupFilter(e.target.value)}
                   className="w-1/2 input-bg rounded-lg px-2 py-3 text-sm border border-theme"
                 >
-                  <option value="All">كل الرياضات</option>
-                  {allSports.map((s, idx) => (
-                    <option key={idx} value={s}>
-                      {s}
+                  <option value="All">كل الجروبات</option>
+                  {allGroups.map((g, idx) => (
+                    <option key={idx} value={g}>
+                      {g}
                     </option>
                   ))}
                 </select>
@@ -1657,7 +1706,7 @@ export const App: React.FC = () => {
               <RosterSection
                 players={players}
                 searchQuery={searchQuery}
-                sportFilter={sportFilter}
+                groupFilter={groupFilter}
                 dateFilter={dateFilter}
                 onSavePlayer={handleSavePlayer}
                 onEditSelect={setEditingPlayer}
@@ -1669,7 +1718,7 @@ export const App: React.FC = () => {
                 }}
                 onOpenHistory={setHistoryPlayerId}
                 checkExpiration={checkExpiration}
-                allSports={allSports}
+                allGroups={allGroups}
               />
             )}
 
@@ -1685,18 +1734,25 @@ export const App: React.FC = () => {
                 onRemoveAttendance={handleRemoveAttendance}
                 getTodayDate={getTodayDate}
                 searchQuery={searchQuery}
-                sportFilter={sportFilter}
+                groupFilter={groupFilter}
                 dateFilter={dateFilter}
                 expectedAttendees={expectedAttendees}
                 onAddExpectedAttendee={handleAddExpectedAttendee}
                 onDeleteExpectedAttendee={handleDeleteExpectedAttendee}
                 onApplyExpectedAttendee={handleApplyExpectedAttendee}
                 onSaveExpectedAttendee={handleSaveExpectedAttendee}
-                allSports={allSports}
+                allGroups={allGroups}
               />
             )}
 
-            {activeTab === 'sports' && <SportsSection players={players} />}
+            {activeTab === 'groups' && (
+              <GroupsSection
+                players={players}
+                groupsConfig={groupsConfig}
+                onSaveGroupConfig={handleSaveGroupConfig}
+                onDeleteGroupConfig={handleDeleteGroupConfig}
+              />
+            )}
 
             {activeTab === 'profile' && (
               <ProfileSection

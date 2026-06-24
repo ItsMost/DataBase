@@ -16,14 +16,14 @@ interface ActiveSectionProps {
   onRemoveAttendance: (playerId: string, dateStr: string) => Promise<void>;
   getTodayDate: () => string;
   searchQuery: string;
-  sportFilter: string;
+  groupFilter: string;
   dateFilter: string;
   expectedAttendees: ExpectedAttendee[];
   onAddExpectedAttendee: (attendee: Omit<ExpectedAttendee, 'id'>) => Promise<void>;
   onDeleteExpectedAttendee: (id: string) => Promise<void>;
   onApplyExpectedAttendee: (attendee: ExpectedAttendee) => Promise<void>;
   onSaveExpectedAttendee: (attendee: ExpectedAttendee) => Promise<void>;
-  allSports: string[];
+  allGroups: string[];
 }
 
 export const ActiveSection: React.FC<ActiveSectionProps> = ({
@@ -37,14 +37,14 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   onRemoveAttendance,
   getTodayDate,
   searchQuery,
-  sportFilter,
+  groupFilter,
   dateFilter,
   expectedAttendees,
   onAddExpectedAttendee,
   onDeleteExpectedAttendee,
   onApplyExpectedAttendee,
   onSaveExpectedAttendee,
-  allSports,
+  allGroups,
 }) => {
   // Subscription Form states
   const [subType, setSubType] = useState('حصة واحدة');
@@ -65,7 +65,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   const [expName, setExpName] = useState('');
   const [selectedExpPlayerId, setSelectedExpPlayerId] = useState('');
   const [showDailyArchive, setShowDailyArchive] = useState(false);
-  const [expSport, setExpSport] = useState('');
+  const [expGroup, setExpGroup] = useState('');
   const [expPaid, setExpPaid] = useState('');
   const [expSubType, setExpSubType] = useState('حصة واحدة');
   const [expTime, setExpTime] = useState('');
@@ -75,7 +75,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   // Inline expected attendee editing states
   const [editingExpId, setEditingExpId] = useState<string | null>(null);
   const [editingExpTime, setEditingExpTime] = useState('');
-  const [editingExpSport, setEditingExpSport] = useState('');
+  const [editingExpGroup, setEditingExpGroup] = useState('');
   const [editingExpPaid, setEditingExpPaid] = useState('');
   const [editingExpSubType, setEditingExpSubType] = useState('');
 
@@ -217,8 +217,8 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     const nameNumStr = (p.name || '').toLowerCase() + (p.number ? p.number.toString() : '');
     const matchesSearch = nameNumStr.includes(searchQuery.toLowerCase());
     
-    const pSport = p.sport || 'General';
-    const matchesSport = sportFilter === 'All' || pSport === sportFilter;
+    const pGroup = p.sport || 'العام';
+    const matchesGroup = groupFilter === 'All' || pGroup === groupFilter;
     
     let matchesDate = true;
     if (dateFilter) {
@@ -227,7 +227,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
       matchesDate = !!(hasHist || hasAtt);
     }
     
-    return matchesSearch && matchesSport && matchesDate;
+    return matchesSearch && matchesGroup && matchesDate;
   });
 
   const monthlySubscribers = filteredSubscribers.filter(p => p.subType && p.subType !== 'حصة واحدة');
@@ -274,11 +274,11 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     const nameNumStr = (p.name || '').toLowerCase() + (p.number ? p.number.toString() : '');
     const matchesSearch = nameNumStr.includes(searchQuery.toLowerCase());
     
-    // Sport filtering
-    const pSport = p.sport || 'General';
-    const matchesSport = sportFilter === 'All' || pSport === sportFilter;
+    // Group filtering
+    const pGroup = p.sport || 'العام';
+    const matchesGroup = groupFilter === 'All' || pGroup === groupFilter;
 
-    return matchesSearch && matchesSport;
+    return matchesSearch && matchesGroup;
   });
 
   const getHourlySummary = () => {
@@ -404,7 +404,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
             await onAddExpectedAttendee({
               name: match.name,
               playerId: match.id,
-              sport: expSport.trim() || match.sport || 'General',
+              sport: expGroup.trim() || match.sport || 'العام',
               paid: parseFloat(expPaid) || 0,
               subType: expSubType,
               date: getTodayDate(),
@@ -413,7 +413,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
             setExpName('');
             setSelectedExpPlayerId('');
             setExpPaid('');
-            setExpSport('');
+            setExpGroup('');
             setExpTime('');
           }}
           className="space-y-3 border-b border-theme/30 pb-4 mb-4"
@@ -430,7 +430,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                 const match = players.find(p => !p.isSystem && !p.isDeleted && p.name === e.target.value);
                 if (match) {
                   setSelectedExpPlayerId(match.id);
-                  setExpSport(match.sport || 'General');
+                  setExpGroup(match.sport || 'العام');
                   if (match.subType && match.subType !== 'حصة واحدة') {
                     setExpSubType('حضور فقط (مشترك شهرياً)');
                     setExpPaid('');
@@ -460,7 +460,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                       onClick={() => {
                         setExpName(p.name);
                         setSelectedExpPlayerId(p.id);
-                        setExpSport(p.sport || 'General');
+                        setExpGroup(p.sport || 'العام');
                         if (p.subType && p.subType !== 'حصة واحدة') {
                           setExpSubType('حضور فقط (مشترك شهرياً)');
                           setExpPaid('');
@@ -490,15 +490,15 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
           <div className="grid grid-cols-2 gap-2">
             <input
               type="text"
-              value={expSport}
-              onChange={(e) => setExpSport(e.target.value)}
-              placeholder="الرياضة (اكتب أو اختر)"
-              list="expSportSuggestions"
+              value={expGroup}
+              onChange={(e) => setExpGroup(e.target.value)}
+              placeholder="الجروب (اكتب أو اختر)"
+              list="expGroupSuggestions"
               className="w-full input-bg rounded-md px-3 py-2 text-sm border border-theme text-right"
             />
-            <datalist id="expSportSuggestions">
-              {allSports.map((s, idx) => (
-                <option key={idx} value={s} />
+            <datalist id="expGroupSuggestions">
+              {allGroups.map((g, idx) => (
+                <option key={idx} value={g} />
               ))}
             </datalist>
 
@@ -583,11 +583,11 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                           />
                         </div>
                         <div>
-                          <label className="text-[9px] text-muted block mb-0.5">الرياضة</label>
+                          <label className="text-[9px] text-muted block mb-0.5">الجروب</label>
                           <input
                             type="text"
-                            value={editingExpSport}
-                            onChange={(e) => setEditingExpSport(e.target.value)}
+                            value={editingExpGroup}
+                            onChange={(e) => setEditingExpGroup(e.target.value)}
                             className="w-full input-bg rounded px-2 py-1 border border-theme text-xs text-right"
                           />
                         </div>
@@ -627,7 +627,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                             await onSaveExpectedAttendee({
                               ...att,
                               time: editingExpTime,
-                              sport: editingExpSport,
+                              sport: editingExpGroup,
                               paid: parseFloat(editingExpPaid) || 0,
                               subType: editingExpSubType,
                             });
@@ -661,7 +661,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
 
                       <div className="flex justify-between items-center text-xs">
                         <div>
-                          <span className="text-muted block text-[10px]">الرياضة</span>
+                          <span className="text-muted block text-[10px]">الجروب</span>
                           <span className="text-main font-semibold">{att.sport}</span>
                         </div>
                         <div>
@@ -685,7 +685,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                           onClick={() => {
                             setEditingExpId(att.id);
                             setEditingExpTime(att.time || '');
-                            setEditingExpSport(att.sport || '');
+                            setEditingExpGroup(att.sport || '');
                             setEditingExpPaid(String(att.paid || 0));
                             setEditingExpSubType(att.subType || 'حصة واحدة');
                           }}
@@ -862,7 +862,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                       </h4>
                       <div className="text-[10px] text-muted mt-1 flex gap-1.5">
                         <span className="input-bg border border-theme px-1.5 py-0.5 rounded">
-                          {player.sport || 'General'}
+                          {player.sport || 'العام'}
                         </span>
                         <span className={`px-1.5 py-0.5 rounded ${isMonthly ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-primary/10 text-primary border border-primary/20'}`}>
                           {player.subType}

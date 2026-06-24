@@ -4,7 +4,7 @@ import type { Player } from '../types';
 interface RosterSectionProps {
   players: Player[];
   searchQuery: string;
-  sportFilter: string;
+  groupFilter: string;
   dateFilter: string;
   onSavePlayer: (playerData: Omit<Player, 'attendance' | 'history'>) => Promise<void>;
   onEditSelect: (player: Player) => void;
@@ -13,13 +13,13 @@ interface RosterSectionProps {
   onOpenPayment: (playerId: string) => void;
   onOpenHistory: (playerId: string) => void;
   checkExpiration: (player: Player) => { isExpired: boolean; days: number; endDateStr: string };
-  allSports: string[];
+  allGroups: string[];
 }
 
 export const RosterSection: React.FC<RosterSectionProps> = ({
   players,
   searchQuery,
-  sportFilter,
+  groupFilter,
   dateFilter,
   onSavePlayer,
   onEditSelect,
@@ -28,7 +28,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
   onOpenPayment,
   onOpenHistory,
   checkExpiration,
-  allSports,
+  allGroups,
 }) => {
   // Get today's local year and month in YYYY-MM format
   const currentMonthPrefix = (() => {
@@ -43,7 +43,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
   const [name, setName] = useState('');
   const [number, setNumber] = useState('');
   const [birthYear, setBirthYear] = useState('');
-  const [sport, setSport] = useState('');
+  const [group, setGroup] = useState('');
   const [club, setClub] = useState('');
   const [phone, setPhone] = useState('');
   const [position, setPosition] = useState('');
@@ -60,7 +60,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
       setName(editingPlayer.name || '');
       setNumber(editingPlayer.number || '');
       setBirthYear(editingPlayer.birthYear ? String(editingPlayer.birthYear) : '');
-      setSport(editingPlayer.sport || '');
+      setGroup(editingPlayer.sport || '');
       setClub(editingPlayer.club || '');
       setPhone(editingPlayer.phone || '');
       setPosition(editingPlayer.position || '');
@@ -87,7 +87,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
   const clearForm = () => {
     setName('');
     setBirthYear('');
-    setSport('');
+    setGroup('');
     setClub('');
     setPhone('');
     setPosition('');
@@ -110,7 +110,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
       number,
       name: name.trim(),
       birthYear: birthYear ? parseInt(birthYear) : '',
-      sport: sport.trim(),
+      sport: group.trim(),
       club: club.trim(),
       phone: phone.trim(),
       position: position.trim(),
@@ -153,8 +153,8 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
     const nameNumStr = (p.name || '').toLowerCase() + (p.number ? p.number.toString() : '');
     const matchesSearch = nameNumStr.includes(searchQuery.toLowerCase());
     
-    const pSport = p.sport || 'General';
-    const matchesSport = sportFilter === 'All' || pSport === sportFilter;
+    const pSport = p.sport || 'العام';
+    const matchesSport = groupFilter === 'All' || pSport === groupFilter;
     
     let matchesDate = true;
     if (dateFilter) {
@@ -167,10 +167,10 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
   });
 
   const isVolleyball = 
-    sport.trim().toLowerCase() === 'volleyball' ||
-    sport.trim() === 'فولي' ||
-    sport.trim() === 'كرة طائرة' ||
-    sport.trim() === 'كرة الطائرة';
+    group.trim().toLowerCase() === 'volleyball' ||
+    group.trim() === 'فولي' ||
+    group.trim() === 'كرة طائرة' ||
+    group.trim() === 'كرة الطائرة';
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -217,15 +217,15 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
             <div className="grid grid-cols-2 gap-3">
               <input
                 type="text"
-                value={sport}
-                onChange={(e) => setSport(e.target.value)}
-                placeholder="الرياضة (اكتب أو اختر)"
-                list="sportSuggestions"
+                value={group}
+                onChange={(e) => setGroup(e.target.value)}
+                placeholder="الجروب (اكتب أو اختر)"
+                list="groupSuggestions"
                 className="w-full input-bg rounded-md px-2 py-3 text-sm"
               />
-              <datalist id="sportSuggestions">
-                {allSports.map((s, idx) => (
-                  <option key={idx} value={s} />
+              <datalist id="groupSuggestions">
+                {allGroups.map((g, idx) => (
+                  <option key={idx} value={g} />
                 ))}
               </datalist>
               
@@ -335,7 +335,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
                     </h4>
                     
                     <div className="text-xs text-muted mt-1">
-                      المواليد: {player.birthYear || '-'} ({ageStr}) | الرياضة: {player.sport || '-'} | النادي: {player.club || '-'}
+                      المواليد: {player.birthYear || '-'} ({ageStr}) | الجروب: {player.sport || '-'} | النادي: {player.club || '-'}
                     </div>
 
                     <div className="mt-2 text-xs grid grid-cols-2 gap-2 text-muted">
