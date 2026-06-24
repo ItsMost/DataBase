@@ -571,7 +571,7 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
                                     : '✅ كل اللاعبين موجودين في الجروب'}
                               </div>
                             ) : (
-                              getAvailablePlayers(groupName).slice(0, 20).map((p) => (
+                              getAvailablePlayers(groupName).map((p) => (
                                 <button
                                   key={p.id}
                                   onClick={() => handleMovePlayer(p.id, groupName)}
