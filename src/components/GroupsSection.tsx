@@ -676,14 +676,10 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
                               onMouseEnter={(e) => {
                                 (e.currentTarget as HTMLElement).style.borderColor = color.border;
                                 (e.currentTarget as HTMLElement).style.background = color.glow;
-                                const btn = (e.currentTarget as HTMLElement).querySelector('.remove-btn') as HTMLElement;
-                                if (btn) btn.style.opacity = '1';
                               }}
                               onMouseLeave={(e) => {
                                 (e.currentTarget as HTMLElement).style.borderColor = 'rgba(100,100,100,0.1)';
                                 (e.currentTarget as HTMLElement).style.background = memberIdx % 2 === 0 ? 'transparent' : 'rgba(100,100,100,0.03)';
-                                const btn = (e.currentTarget as HTMLElement).querySelector('.remove-btn') as HTMLElement;
-                                if (btn) btn.style.opacity = '0';
                               }}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -708,29 +704,41 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
                                 </div>
                               </div>
 
-                              {/* Remove button */}
-                              {groupName !== 'العام' && (
-                                <button
-                                  className="remove-btn"
-                                  onClick={() => handleRemoveFromGroup(p.id)}
+                              {/* Transfer player dropdown */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <select
+                                  value={groupName}
+                                  onChange={(e) => handleMovePlayer(p.id, e.target.value)}
                                   style={{
-                                    opacity: 0,
-                                    padding: '5px 10px',
+                                    padding: '5px 8px',
                                     borderRadius: '8px',
-                                    fontSize: '9px',
+                                    fontSize: '10px',
                                     fontWeight: 800,
+                                    background: color.bg,
+                                    border: `1px solid ${color.border}`,
+                                    color: color.text,
                                     cursor: 'pointer',
-                                    background: 'rgba(239, 68, 68, 0.1)',
-                                    color: '#f87171',
-                                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                                    outline: 'none',
+                                    textAlign: 'right',
+                                    direction: 'rtl',
                                     transition: 'all 0.2s ease',
-                                    whiteSpace: 'nowrap',
                                   }}
-                                  title="نقل للعام"
+                                  onMouseEnter={(e) => {
+                                    (e.target as HTMLSelectElement).style.borderColor = color.accent;
+                                    (e.target as HTMLSelectElement).style.boxShadow = `0 0 8px ${color.glow}`;
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    (e.target as HTMLSelectElement).style.borderColor = color.border;
+                                    (e.target as HTMLSelectElement).style.boxShadow = 'none';
+                                  }}
                                 >
-                                  نقل للعام ✖️
-                                </button>
-                              )}
+                                  {allGroups.map((g) => (
+                                    <option key={g} value={g} style={{ background: '#1e293b', color: '#fff' }}>
+                                      {g === groupName ? `📍 جروب: ${g}` : `➡️ نقل إلى: ${g}`}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
                           ))}
                         </div>
