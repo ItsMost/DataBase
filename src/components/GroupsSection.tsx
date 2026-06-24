@@ -38,6 +38,7 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null);
   const [editNameValue, setEditNameValue] = useState('');
   const [playerSearch, setPlayerSearch] = useState('');
+  const [playerFilterMode, setPlayerFilterMode] = useState<'unassigned' | 'all'>('unassigned');
   const [showPlayerDropdown, setShowPlayerDropdown] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -48,6 +49,7 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setShowPlayerDropdown(null);
         setPlayerSearch('');
+        setPlayerFilterMode('unassigned');
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -83,6 +85,13 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
   const getAvailablePlayers = (groupName: string) => {
     return activePlayers
       .filter(p => (p.sport || 'العام') !== groupName)
+      .filter(p => {
+        if (groupName === 'العام') return true;
+        if (playerFilterMode === 'unassigned') {
+          return (p.sport || 'العام') === 'العام';
+        }
+        return true;
+      })
       .filter(p => !playerSearch || p.name.toLowerCase().includes(playerSearch.toLowerCase()));
   };
 
@@ -478,64 +487,135 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
                           borderRadius: '14px',
                           border: `1px solid ${color.border}`,
                           boxShadow: `0 12px 40px rgba(0,0,0,0.2), 0 0 0 1px ${color.border}`,
-                          maxHeight: '200px',
-                          overflowY: 'auto',
+                          maxHeight: '280px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          overflow: 'hidden',
                           backdropFilter: 'blur(20px)',
                         }} className="card-bg">
-                          {getAvailablePlayers(groupName).length === 0 ? (
+                          {groupName !== 'العام' && (
                             <div style={{
-                              padding: '20px',
-                              textAlign: 'center',
-                              fontSize: '11px',
-                              fontWeight: 700,
-                            }} className="text-muted">
-                              {playerSearch ? '❌ لا يوجد لاعب بهذا الاسم' : '✅ كل اللاعبين موجودين في الجروب'}
-                            </div>
-                          ) : (
-                            getAvailablePlayers(groupName).slice(0, 20).map((p) => (
+                              display: 'flex',
+                              borderBottom: `1px solid ${color.border}`,
+                              background: 'rgba(100, 100, 100, 0.05)',
+                              padding: '4px',
+                              gap: '4px',
+                              flexShrink: 0,
+                            }}>
                               <button
-                                key={p.id}
-                                onClick={() => handleMovePlayer(p.id, groupName)}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPlayerFilterMode('unassigned');
+                                }}
                                 style={{
-                                  width: '100%',
-                                  textAlign: 'right',
-                                  padding: '10px 16px',
-                                  fontSize: '12px',
-                                  fontWeight: 700,
+                                  flex: 1,
+                                  padding: '8px 4px',
+                                  fontSize: '11px',
+                                  fontWeight: 800,
+                                  borderRadius: '10px',
+                                  border: 'none',
                                   cursor: 'pointer',
+                                  transition: 'all 0.2s ease',
+                                  background: playerFilterMode === 'unassigned' ? color.accent : 'transparent',
+                                  color: playerFilterMode === 'unassigned' ? '#fff' : '#9ca3af',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  border: 'none',
-                                  background: 'transparent',
-                                  transition: 'all 0.15s ease',
-                                  borderBottom: '1px solid rgba(100,100,100,0.08)',
-                                }}
-                                className="text-main"
-                                onMouseEnter={(e) => {
-                                  (e.target as HTMLElement).style.background = color.bg;
-                                }}
-                                onMouseLeave={(e) => {
-                                  (e.target as HTMLElement).style.background = 'transparent';
+                                  justifyContent: 'center',
+                                  gap: '4px',
                                 }}
                               >
-                                <span style={{
-                                  fontSize: '9px',
-                                  fontWeight: 600,
-                                  padding: '2px 8px',
-                                  borderRadius: '8px',
-                                  background: 'rgba(100,100,100,0.1)',
-                                  whiteSpace: 'nowrap',
-                                }} className="text-muted">
-                                  من: {p.sport || 'العام'}
-                                </span>
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  {p.name}
-                                  <span style={{ fontSize: '14px' }}>➕</span>
-                                </span>
+                                <span>🎯</span>
+                                <span>من غير جروب ({activePlayers.filter(p => (p.sport || 'العام') === 'العام').length})</span>
                               </button>
-                            ))
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPlayerFilterMode('all');
+                                }}
+                                style={{
+                                  flex: 1,
+                                  padding: '8px 4px',
+                                  fontSize: '11px',
+                                  fontWeight: 800,
+                                  borderRadius: '10px',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s ease',
+                                  background: playerFilterMode === 'all' ? color.accent : 'transparent',
+                                  color: playerFilterMode === 'all' ? '#fff' : '#9ca3af',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '4px',
+                                }}
+                              >
+                                <span>🌐</span>
+                                <span>الكل ({activePlayers.filter(p => (p.sport || 'العام') !== groupName).length})</span>
+                              </button>
+                            </div>
                           )}
+                          <div style={{ overflowY: 'auto', flex: 1 }}>
+                            {getAvailablePlayers(groupName).length === 0 ? (
+                              <div style={{
+                                padding: '20px',
+                                textAlign: 'center',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                              }} className="text-muted">
+                                {playerSearch
+                                  ? '❌ لا يوجد لاعب بهذا الاسم'
+                                  : playerFilterMode === 'unassigned'
+                                    ? '✅ كل اللاعبين من غير جروب تم إضافتهم'
+                                    : '✅ كل اللاعبين موجودين في الجروب'}
+                              </div>
+                            ) : (
+                              getAvailablePlayers(groupName).slice(0, 20).map((p) => (
+                                <button
+                                  key={p.id}
+                                  onClick={() => handleMovePlayer(p.id, groupName)}
+                                  style={{
+                                    width: '100%',
+                                    textAlign: 'right',
+                                    padding: '10px 16px',
+                                    fontSize: '12px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    border: 'none',
+                                    background: 'transparent',
+                                    transition: 'all 0.15s ease',
+                                    borderBottom: '1px solid rgba(100,100,100,0.08)',
+                                  }}
+                                  className="text-main"
+                                  onMouseEnter={(e) => {
+                                    (e.target as HTMLElement).style.background = color.bg;
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    (e.target as HTMLElement).style.background = 'transparent';
+                                  }}
+                                >
+                                  <span style={{
+                                    fontSize: '9px',
+                                    fontWeight: 600,
+                                    padding: '2px 8px',
+                                    borderRadius: '8px',
+                                    background: 'rgba(100,100,100,0.1)',
+                                    whiteSpace: 'nowrap',
+                                  }} className="text-muted">
+                                    من: {p.sport || 'العام'}
+                                  </span>
+                                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    {p.name}
+                                    <span style={{ fontSize: '14px' }}>➕</span>
+                                  </span>
+                                </button>
+                              ))
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
