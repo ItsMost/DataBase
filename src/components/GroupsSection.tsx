@@ -6,6 +6,7 @@ interface GroupsSectionProps {
   groupsConfig: HistoryEntry[];
   onSaveGroupConfig: (name: string, focusType: 'focus' | 'presence') => Promise<void>;
   onDeleteGroupConfig: (name: string) => Promise<void>;
+  onRenameGroupConfig: (oldName: string, newName: string) => Promise<void>;
 }
 
 export const GroupsSection: React.FC<GroupsSectionProps> = ({
@@ -13,6 +14,7 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
   groupsConfig,
   onSaveGroupConfig,
   onDeleteGroupConfig,
+  onRenameGroupConfig,
 }) => {
   // Month names in Arabic
   const monthNames = [
@@ -45,6 +47,10 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
   const [showDailyPlayers, setShowDailyPlayers] = useState(false);
   const [classificationFilter, setClassificationFilter] = useState<'all' | 'focus' | 'presence'>('all');
 
+  // Inline edit state
+  const [editingGroupName, setEditingGroupName] = useState<string | null>(null);
+  const [editNameValue, setEditNameValue] = useState('');
+
   // Add group form states
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupFocus, setNewGroupFocus] = useState<'focus' | 'presence'>('focus');
@@ -61,7 +67,7 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
   };
 
   // 3. Compute groups dynamically
-  const defaultGroups = ['جروب A', 'جروب B', 'العام'];
+  const defaultGroups = ['العام'];
   const currentGroups = players.filter(p => !p.isSystem && !p.isDeleted).map(p => p.sport || 'العام');
   const configuredGroups = groupsConfig.map(h => h.desc);
   const allGroups = [...new Set([...defaultGroups, ...currentGroups, ...configuredGroups])];
@@ -378,18 +384,59 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
                 {/* Card Header */}
                 <div className="flex justify-between items-start mb-3">
                   <div>
-                    <h3 
-                      onClick={() => {
-                        setSelectedGroup(isSelected ? null : groupName);
-                        setShowDailyPlayers(false);
-                      }}
-                      className="font-black text-main text-base cursor-pointer hover:text-primary transition-all flex items-center gap-1.5"
-                    >
-                      {groupName}
-                      <span className="text-[10px] text-muted font-normal">
-                        ({stats.membersCount} لاعب)
-                      </span>
-                    </h3>
+                    {editingGroupName === groupName ? (
+                      <div className="flex items-center gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={editNameValue}
+                          onChange={(e) => setEditNameValue(e.target.value)}
+                          className="input-bg rounded px-2 py-1 text-xs border border-theme text-right w-32 font-bold text-main"
+                          autoFocus
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter') {
+                              if (editNameValue.trim() && editNameValue.trim() !== groupName) {
+                                await onRenameGroupConfig(groupName, editNameValue.trim());
+                              }
+                              setEditingGroupName(null);
+                            } else if (e.key === 'Escape') {
+                              setEditingGroupName(null);
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={async () => {
+                            if (editNameValue.trim() && editNameValue.trim() !== groupName) {
+                              await onRenameGroupConfig(groupName, editNameValue.trim());
+                            }
+                            setEditingGroupName(null);
+                          }}
+                          className="bg-success text-white p-1 rounded hover:opacity-90 transition-all text-xs"
+                          title="حفظ الاسم"
+                        >
+                          ✔️
+                        </button>
+                        <button
+                          onClick={() => setEditingGroupName(null)}
+                          className="bg-zinc-500/20 text-zinc-300 p-1 rounded hover:bg-zinc-500 hover:text-white transition-all text-xs"
+                          title="إلغاء"
+                        >
+                          ✖️
+                        </button>
+                      </div>
+                    ) : (
+                      <h3 
+                        onClick={() => {
+                          setSelectedGroup(isSelected ? null : groupName);
+                          setShowDailyPlayers(false);
+                        }}
+                        className="font-black text-main text-base cursor-pointer hover:text-primary transition-all flex items-center gap-1.5"
+                      >
+                        {groupName}
+                        <span className="text-[10px] text-muted font-normal">
+                          ({stats.membersCount} لاعب)
+                        </span>
+                      </h3>
+                    )}
                     
                     {/* Badge */}
                     <span 
@@ -414,18 +461,30 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
                       {focusType === 'focus' ? '👥' : '🔥'}
                     </button>
                     {groupName !== 'العام' && (
-                      <button
-                        onClick={async () => {
-                          if (confirm(`هل أنت متأكد من حذف إعدادات الجروب "${groupName}"؟`)) {
-                            await onDeleteGroupConfig(groupName);
-                            if (isSelected) setSelectedGroup(null);
-                          }
-                        }}
-                        className="p-1 rounded bg-danger/10 hover:bg-danger hover:text-white border border-danger/20 text-xs"
-                        title="حذف الجروب"
-                      >
-                        🗑️
-                      </button>
+                      <>
+                        <button
+                          onClick={() => {
+                            setEditingGroupName(groupName);
+                            setEditNameValue(groupName);
+                          }}
+                          className="p-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-theme text-xs"
+                          title="تعديل اسم الجروب"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (confirm(`هل أنت متأكد من حذف الجروب "${groupName}"؟ سيتم نقل جميع لاعبي هذا الجروب تلقائياً إلى جروب العام.`)) {
+                              await onDeleteGroupConfig(groupName);
+                              if (isSelected) setSelectedGroup(null);
+                            }
+                          }}
+                          className="p-1 rounded bg-danger/10 hover:bg-danger hover:text-white border border-danger/20 text-xs"
+                          title="حذف الجروب"
+                        >
+                          🗑️
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>

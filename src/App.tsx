@@ -416,12 +416,62 @@ export const App: React.FC = () => {
         setPlayers(cleanedPlayers);
       }
 
+      // Seed group configs from existing database players if sys_groups_config doesn't exist or is empty
+      const latestPlayers = await db.players.toArray();
+      const sysGroups = latestPlayers.find(p => p.id === 'sys_groups_config');
+      if (!sysGroups || !sysGroups.history || sysGroups.history.length === 0) {
+        const uniqueSports = [...new Set(latestPlayers.filter(p => !p.isSystem && p.sport && p.sport !== 'العام' && p.sport !== 'General').map(p => p.sport!))];
+        if (uniqueSports.length > 0) {
+          const newSysGroups = {
+            id: 'sys_groups_config',
+            isSystem: true,
+            name: 'إعدادات الجروبات',
+            history: uniqueSports.map((sport, index) => ({
+              desc: sport,
+              subType: 'presence',
+              cost: 0,
+              paid: 0,
+              date: todayStr,
+              timestamp: Date.now() + index
+            }))
+          };
+          await db.players.put(newSysGroups);
+          await syncPlayerToCloud(newSysGroups);
+          const finalReload = await db.players.toArray();
+          setPlayers(finalReload);
+        }
+      }
+
       // Step B: Pull initial cloud data and merge
       if (navigator.onLine) {
         setTimeout(async () => {
           const syncedPlayers = await fetchInitialDataFromSupabase();
           if (syncedPlayers.length > 0) {
             setPlayers(syncedPlayers);
+            // Also seed groups from synced players
+            const sysGroupsSynced = syncedPlayers.find(p => p.id === 'sys_groups_config');
+            if (!sysGroupsSynced || !sysGroupsSynced.history || sysGroupsSynced.history.length === 0) {
+              const uniqueSports = [...new Set(syncedPlayers.filter(p => !p.isSystem && p.sport && p.sport !== 'العام' && p.sport !== 'General').map(p => p.sport!))];
+              if (uniqueSports.length > 0) {
+                const newSysGroups = {
+                  id: 'sys_groups_config',
+                  isSystem: true,
+                  name: 'إعدادات الجروبات',
+                  history: uniqueSports.map((sport, index) => ({
+                    desc: sport,
+                    subType: 'presence',
+                    cost: 0,
+                    paid: 0,
+                    date: todayStr,
+                    timestamp: Date.now() + index
+                  }))
+                };
+                await db.players.put(newSysGroups);
+                await syncPlayerToCloud(newSysGroups);
+                const finalReload = await db.players.toArray();
+                setPlayers(finalReload);
+              }
+            }
           }
           const syncedExpected = await fetchInitialExpectedAttendeesFromSupabase();
           // Filter out expired ones pulled from cloud, and delete them from Supabase too
@@ -667,15 +717,172 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteGroupConfig = async (name: string) => {
+    // 1. Delete group configuration
     const sys = await db.players.get('sys_groups_config');
     if (!sys || !sys.history) return;
 
     const history = sys.history.filter(h => h.desc !== name);
     const updatedSys = { ...sys, history };
     await syncPlayerToCloud(updatedSys);
+
+    // 2. Reassign all players in this group to 'العام'
+    const allPlayers = await db.players.toArray();
+    const affectedPlayers = allPlayers.filter(p => !p.isSystem && p.sport === name);
+    const updatedPlayers = affectedPlayers.map(p => ({
+      ...p,
+      sport: 'العام',
+      last_updated: Date.now(),
+    }));
+    if (updatedPlayers.length > 0) {
+      await db.players.bulkPut(updatedPlayers);
+      if (navigator.onLine) {
+        await syncAllToCloud(updatedPlayers);
+      } else {
+        // Queue saves if offline
+        for (const p of updatedPlayers) {
+          const existing = await db.syncQueue
+            .where('playerId')
+            .equals(p.id)
+            .and(item => item.action === 'save')
+            .first();
+          if (!existing) {
+            await db.syncQueue.add({
+              playerId: p.id,
+              action: 'save',
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+    }
+
+    // 3. Reassign expected attendees for today to 'العام'
+    const allExpected = await db.expectedToday.toArray();
+    const affectedExpected = allExpected.filter(att => att.sport === name);
+    const updatedExpected = affectedExpected.map(att => ({
+      ...att,
+      sport: 'العام',
+      last_updated: Date.now(),
+    }));
+    if (updatedExpected.length > 0) {
+      await db.expectedToday.bulkPut(updatedExpected);
+      if (navigator.onLine) {
+        const upsertExpectedData = updatedExpected.map(att => ({ id: String(att.id), attendee_data: att }));
+        await supabase.from('expected_today_sync').upsert(upsertExpectedData);
+      } else {
+        // Queue expected today saves if offline
+        for (const att of updatedExpected) {
+          const existing = await db.syncQueue
+            .where('playerId')
+            .equals(att.id)
+            .and(item => item.action === 'save_expected')
+            .first();
+          if (!existing) {
+            await db.syncQueue.add({
+              playerId: att.id,
+              action: 'save_expected',
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+      const updatedExpectedList = await db.expectedToday.toArray();
+      setExpectedAttendees(updatedExpectedList);
+    }
+
+    // 4. Reload player list
     const updatedList = await db.players.toArray();
     setPlayers(updatedList);
-    triggerToast("تم حذف الجروب بنجاح ✅", true);
+    triggerToast("تم حذف الجروب ونقل اللاعبين لجروب العام بنجاح ✅", true);
+  };
+
+  const handleRenameGroupConfig = async (oldName: string, newName: string) => {
+    if (!newName.trim() || oldName === newName) return;
+
+    // 1. Update config
+    const sys = await db.players.get('sys_groups_config');
+    if (!sys || !sys.history) return;
+
+    const history = sys.history.map(h => {
+      if (h.desc === oldName) {
+        return {
+          ...h,
+          desc: newName.trim(),
+          timestamp: Date.now()
+        };
+      }
+      return h;
+    });
+    const updatedSys = { ...sys, history };
+    await syncPlayerToCloud(updatedSys);
+
+    // 2. Update players
+    const allPlayers = await db.players.toArray();
+    const affectedPlayers = allPlayers.filter(p => !p.isSystem && p.sport === oldName);
+    const updatedPlayers = affectedPlayers.map(p => ({
+      ...p,
+      sport: newName.trim(),
+      last_updated: Date.now(),
+    }));
+    if (updatedPlayers.length > 0) {
+      await db.players.bulkPut(updatedPlayers);
+      if (navigator.onLine) {
+        await syncAllToCloud(updatedPlayers);
+      } else {
+        for (const p of updatedPlayers) {
+          const existing = await db.syncQueue
+            .where('playerId')
+            .equals(p.id)
+            .and(item => item.action === 'save')
+            .first();
+          if (!existing) {
+            await db.syncQueue.add({
+              playerId: p.id,
+              action: 'save',
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+    }
+
+    // 3. Update expected attendees for today
+    const allExpected = await db.expectedToday.toArray();
+    const affectedExpected = allExpected.filter(att => att.sport === oldName);
+    const updatedExpected = affectedExpected.map(att => ({
+      ...att,
+      sport: newName.trim(),
+      last_updated: Date.now(),
+    }));
+    if (updatedExpected.length > 0) {
+      await db.expectedToday.bulkPut(updatedExpected);
+      if (navigator.onLine) {
+        const upsertExpectedData = updatedExpected.map(att => ({ id: String(att.id), attendee_data: att }));
+        await supabase.from('expected_today_sync').upsert(upsertExpectedData);
+      } else {
+        for (const att of updatedExpected) {
+          const existing = await db.syncQueue
+            .where('playerId')
+            .equals(att.id)
+            .and(item => item.action === 'save_expected')
+            .first();
+          if (!existing) {
+            await db.syncQueue.add({
+              playerId: att.id,
+              action: 'save_expected',
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+      const updatedExpectedList = await db.expectedToday.toArray();
+      setExpectedAttendees(updatedExpectedList);
+    }
+
+    // 4. Reload player list
+    const updatedList = await db.players.toArray();
+    setPlayers(updatedList);
+    triggerToast("تم تعديل اسم الجروب وتحديث اللاعبين بنجاح ✅");
   };
 
   // Save Subscription Payment details
@@ -1516,13 +1723,15 @@ export const App: React.FC = () => {
   const historyPlayer = players.find(x => x.id === historyPlayerId);
 
   // Compute group lists suggestions dynamically
-  const defaultGroups = ['جروب A', 'جروب B', 'العام'];
-  const currentGroups = players.filter(p => !p.isSystem).map(p => p.sport || 'العام');
-  const allGroups = [...new Set([...defaultGroups, ...currentGroups])];
+  const defaultGroups = ['العام'];
+  const currentGroups = players.filter(p => !p.isSystem && !p.isDeleted).map(p => p.sport || 'العام');
 
   // Load groups configurations
   const groupsConfigPlayer = players.find(p => p.id === 'sys_groups_config');
   const groupsConfig = groupsConfigPlayer?.history || [];
+  const configuredGroups = groupsConfig.map(h => h.desc);
+
+  const allGroups = [...new Set([...defaultGroups, ...currentGroups, ...configuredGroups])];
 
   return (
     <div className="max-w-md md:max-w-5xl lg:max-w-6xl xl:max-w-7xl mx-auto min-h-screen relative pb-28 md:pb-20 px-2 sm:px-4">
@@ -1751,6 +1960,7 @@ export const App: React.FC = () => {
                 groupsConfig={groupsConfig}
                 onSaveGroupConfig={handleSaveGroupConfig}
                 onDeleteGroupConfig={handleDeleteGroupConfig}
+                onRenameGroupConfig={handleRenameGroupConfig}
               />
             )}
 
