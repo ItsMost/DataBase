@@ -142,11 +142,14 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
         dailyCost: number;
         monthlyPaymentCount: number;
         dailyPaymentCount: number;
+        dailyAttendances: number;
+        monthlyAttendances: number;
       };
     } = {};
 
     players.forEach(p => {
       if (p.isSystem) {
+        if (p.id !== 'sys_expenses') return; // Ignore non-expense system players
         if (p.history) {
           p.history.forEach(h => {
             const [y, m, d] = h.date.split('-');
@@ -169,7 +172,8 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                 paymentCount: 0, totalAttendances: 0, dateObj: hDate,
                 monthlyRevenue: 0, dailyRevenue: 0,
                 monthlyCost: 0, dailyCost: 0,
-                monthlyPaymentCount: 0, dailyPaymentCount: 0
+                monthlyPaymentCount: 0, dailyPaymentCount: 0,
+                dailyAttendances: 0, monthlyAttendances: 0
               };
             }
             dailyStats[dayKey].expenses += h.cost || 0;
@@ -207,7 +211,8 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                 paymentCount: 0, totalAttendances: 0, dateObj: hDate,
                 monthlyRevenue: 0, dailyRevenue: 0,
                 monthlyCost: 0, dailyCost: 0,
-                monthlyPaymentCount: 0, dailyPaymentCount: 0
+                monthlyPaymentCount: 0, dailyPaymentCount: 0,
+                dailyAttendances: 0, monthlyAttendances: 0
               };
             }
 
@@ -250,7 +255,8 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                 paymentCount: 0, totalAttendances: 0, dateObj: attDateObj,
                 monthlyRevenue: 0, dailyRevenue: 0,
                 monthlyCost: 0, dailyCost: 0,
-                monthlyPaymentCount: 0, dailyPaymentCount: 0
+                monthlyPaymentCount: 0, dailyPaymentCount: 0,
+                dailyAttendances: 0, monthlyAttendances: 0
               };
             }
             dailyStats[dayKey].totalAttendances++;
@@ -277,6 +283,12 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                   isMonthly = true;
                 }
               }
+            }
+
+            if (isMonthly) {
+              dailyStats[dayKey].monthlyAttendances++;
+            } else {
+              dailyStats[dayKey].dailyAttendances++;
             }
 
             if (!isMonthly && !hasPaidDailyToday) {
@@ -330,7 +342,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   // --- Expenses lists computed for current month ---
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
-  const systemPlayer = players.find(p => p.isSystem);
+  const systemPlayer = players.find(p => p.id === 'sys_expenses');
   const currentMonthExpenses = systemPlayer?.history
     ? systemPlayer.history
         .filter(h => {
@@ -459,38 +471,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
 
     players.forEach(p => {
       if (p.isSystem) {
-        p.history?.forEach(h => {
-          if (h.date === selectedDayKey) {
-            list.push(
-              <div
-                key={h.timestamp}
-                className="input-bg rounded-lg p-3 text-right shadow-sm border border-orange-500/30 relative mb-3"
-              >
-                <button
-                  onClick={() => {
-                    onDeleteExpense(h.timestamp);
-                    setSelectedDayKey(null); // Close modal after delete
-                  }}
-                  className="absolute top-3 left-3 text-danger hover:text-white bg-danger/10 hover:bg-danger px-2 py-1 rounded text-xs transition-all border border-danger/20"
-                >
-                  مسح 🗑️
-                </button>
-                <div className="border-b border-theme pb-2 mb-2 pr-28">
-                  <div className="font-bold text-orange-400 text-sm">مصروف: {h.desc}</div>
-                  <span className="text-orange-400 font-bold bg-orange-400/10 px-2 py-1 rounded text-[10px] mt-1 inline-block">
-                    خصم من الخزينة
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm px-1">
-                  <div>
-                    <span className="text-muted text-xs block mb-1">قيمة المصروف</span>
-                    <span className="text-danger font-bold">{h.cost} ج</span>
-                  </div>
-                </div>
-              </div>
-            );
-          }
-        });
+        return; // Skip system players (expenses) entirely in this modal as requested
       } else {
         p.history?.forEach(h => {
           if (h.date === selectedDayKey) {
@@ -938,10 +919,11 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
 
                 const showOnlyDaily = excludeMonthlyDays[key] || false;
                 const dispRevenue = showOnlyDaily ? stat.dailyRevenue : stat.revenue;
-                const dispCost = showOnlyDaily ? stat.dailyCost : stat.cost;
-                const dispExpenses = stat.expenses || 0;
-                const dispProfit = showOnlyDaily ? (stat.dailyRevenue - stat.dailyCost - stat.expenses) : stat.profit;
+                // Gym money calculation: totalAttendances * 60 for All mode, dailyAttendances * 60 for Daily Sessions only mode
+                const dispCost = showOnlyDaily ? (stat.dailyAttendances * 60) : (stat.totalAttendances * 60);
+                const dispProfit = dispRevenue - dispCost;
                 const dispPaymentCount = showOnlyDaily ? stat.dailyPaymentCount : stat.paymentCount;
+                const dispAttendanceCount = showOnlyDaily ? stat.dailyAttendances : stat.totalAttendances;
 
                 return (
                   <div
@@ -988,10 +970,10 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                     
                     <div className="text-[11px] text-muted mb-2 text-center bg-black/20 rounded py-1 border border-theme/50">
                       <span className="text-success font-semibold">{dispPaymentCount} دفعات فردية</span> |{' '}
-                      <span className="text-primary-light font-semibold">{stat.totalAttendances} حضور إجمالي</span>
+                      <span className="text-primary-light font-semibold">{dispAttendanceCount} حضور إجمالي</span>
                     </div>
                     
-                    <div className="grid grid-cols-4 gap-1 text-xs text-center">
+                    <div className="grid grid-cols-3 gap-1 text-xs text-center">
                       <div>
                         <div className="text-muted mb-1 text-[10px]">إيرادات</div>
                         <div className="text-success font-bold">{dispRevenue} ج</div>
@@ -1001,16 +983,12 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                       </div>
                       <div>
                         <div className="text-muted mb-1 text-[10px]">جيم</div>
-                        <div className="text-danger font-bold">{dispCost}</div>
-                      </div>
-                      <div>
-                        <div className="text-muted mb-1 text-[10px]">مصروفات</div>
-                        <div className="text-orange-400 font-bold">{dispExpenses}</div>
+                        <div className="text-danger font-bold">{dispCost} ج</div>
                       </div>
                       <div>
                         <div className="text-primary mb-1 text-[10px]">صافي</div>
                         <div className={`font-bold glow-text ${showOnlyDaily ? 'text-amber-400' : 'text-primary-light'}`}>
-                          {dispProfit}
+                          {dispProfit} ج
                         </div>
                       </div>
                     </div>

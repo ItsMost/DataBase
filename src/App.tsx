@@ -1513,6 +1513,7 @@ export const App: React.FC = () => {
 
     players.forEach(p => {
       if (p.isSystem) {
+        if (p.id !== 'sys_expenses') return;
         p.history?.forEach(h => {
           if (!h.date) return;
           const parts = h.date.split('-');
@@ -1592,6 +1593,7 @@ export const App: React.FC = () => {
 
     players.forEach(p => {
       if (p.isSystem) {
+        if (p.id !== 'sys_expenses') return;
         p.history?.forEach(h => {
           if (!h.date) return;
           const parts = h.date.split('-');
