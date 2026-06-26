@@ -466,26 +466,33 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   // --- Daily Details Modal calculations ---
   const getDailyDetailsList = () => {
     if (!selectedDayKey) return null;
-    const monthlyList: React.ReactNode[] = [];
-    const dailyList: React.ReactNode[] = [];
-    let monthlyTotalRevenue = 0;
-    let dailyTotalRevenue = 0;
+    const monthlyPaymentsList: React.ReactNode[] = [];
+    const monthlyAttendancesList: React.ReactNode[] = [];
+    const dailySessionsList: React.ReactNode[] = [];
+    let totalMonthlyPayments = 0;
+    let totalMonthlyAttendancesCost = 0;
+    let totalDailyPayments = 0;
 
     const showOnlyDaily = excludeMonthlyDays[selectedDayKey] || false;
 
     players.forEach(p => {
       if (p.isSystem) {
-        return; // Skip system players (expenses) entirely in this modal as requested
-      } else {
-        p.history?.forEach(h => {
-          if (h.date === selectedDayKey) {
-            const isDailySession = h.subType === 'حصة واحدة';
-            if (showOnlyDaily && !isDailySession) {
-              return;
-            }
+        return; // Skip system players
+      }
 
-            const profit = (h.paid || 0) - (h.cost || 0);
-            const itemElement = (
+      // 1. Process payments (history entries) on this day:
+      p.history?.forEach(h => {
+        if (h.date === selectedDayKey) {
+          const isDailySession = h.subType === 'حصة واحدة';
+          if (showOnlyDaily && !isDailySession) {
+            return;
+          }
+
+          if (isDailySession) {
+            // Daily session represents both payment and attendance
+            const profit = (h.paid || 0) - 60;
+            totalDailyPayments += h.paid || 0;
+            dailySessionsList.push(
               <div
                 key={h.timestamp}
                 className="input-bg rounded-lg p-3 text-right shadow-sm border border-theme relative mb-3"
@@ -493,7 +500,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                 <button
                   onClick={() => {
                     onDeletePlayerTransaction(p.id, h.timestamp);
-                    setSelectedDayKey(null); // Close modal after delete
+                    setSelectedDayKey(null);
                   }}
                   className="absolute top-3 left-3 text-danger hover:text-white bg-danger/10 hover:bg-danger px-2 py-1 rounded text-xs transition-all border border-danger/20"
                 >
@@ -514,7 +521,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                   </div>
                   <div>
                     <span className="text-muted mb-1 block">تكلفة الجيم</span>
-                    <span className="text-danger font-bold text-sm">{h.cost} ج</span>
+                    <span className="text-danger font-bold text-sm">60 ج</span>
                   </div>
                   <div>
                     <span className="text-primary mb-1 block">صافي الربح</span>
@@ -523,58 +530,177 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                 </div>
               </div>
             );
+          } else {
+            // Monthly subscription payments (only payment recorded today, gym cost is charged on attendance)
+            totalMonthlyPayments += h.paid || 0;
+            monthlyPaymentsList.push(
+              <div
+                key={h.timestamp}
+                className="input-bg rounded-lg p-3 text-right shadow-sm border border-theme relative mb-3"
+              >
+                <button
+                  onClick={() => {
+                    onDeletePlayerTransaction(p.id, h.timestamp);
+                    setSelectedDayKey(null);
+                  }}
+                  className="absolute top-3 left-3 text-danger hover:text-white bg-danger/10 hover:bg-danger px-2 py-1 rounded text-xs transition-all border border-danger/20"
+                >
+                  مسح 🗑️
+                </button>
+                <div className="border-b border-theme pb-2 mb-2 pr-24">
+                  <div className="font-bold text-primary text-sm">
+                    اللاعب: <span className="text-primary-light">[#{p.number}] {p.name}</span>
+                  </div>
+                  <span className="text-primary font-bold bg-primary-glow px-2 py-0.5 rounded text-[10px] mt-1 inline-block">
+                    تفعيل اشتراك: {h.subType}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs px-1">
+                  <div>
+                    <span className="text-muted mb-1 block">المبلغ المدفوع</span>
+                    <span className="text-success font-bold text-sm">{h.paid} ج</span>
+                  </div>
+                  <div>
+                    <span className="text-muted mb-1 block">تكلفة الجيم</span>
+                    <span className="text-danger font-bold text-sm">0 ج</span>
+                  </div>
+                  <div>
+                    <span className="text-primary mb-1 block">صافي الربح</span>
+                    <span className="text-primary-light font-bold text-sm">{h.paid} ج</span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+        }
+      });
 
-            if (isDailySession) {
-              dailyTotalRevenue += h.paid || 0;
-              dailyList.push(itemElement);
-            } else {
-              monthlyTotalRevenue += h.paid || 0;
-              monthlyList.push(itemElement);
+      // 2. Process attendances on this day:
+      if (!showOnlyDaily && p.attendance?.includes(selectedDayKey)) {
+        // Check if this attendance is under an active monthly subscription on this day.
+        let isMonthly = false;
+        let activeSub: any = null;
+
+        if (p.history) {
+          const pastHistories = p.history
+            .filter(h => h.date <= selectedDayKey)
+            .sort((a, b) => b.date.localeCompare(a.date));
+          
+          if (pastHistories.length > 0 && pastHistories[0].subType !== 'حصة واحدة') {
+            const startDate = new Date(pastHistories[0].date);
+            const endDate = new Date(startDate);
+            endDate.setMonth(endDate.getMonth() + 1);
+            
+            const attDate = new Date(selectedDayKey);
+            if (attDate <= endDate) {
+              isMonthly = true;
+              activeSub = pastHistories[0];
             }
           }
-        });
+        }
+
+        if (isMonthly && activeSub) {
+          // Calculate which session number this is under the active subscription:
+          // Count attendances between activeSub.date and selectedDayKey (inclusive)
+          const subAttendances = p.attendance
+            .filter(d => d >= activeSub.date && d <= selectedDayKey)
+            .sort((a, b) => a.localeCompare(b));
+          
+          const sessionNumber = subAttendances.indexOf(selectedDayKey) + 1;
+          const maxSessions = activeSub.subType === '8 حصص' ? 8 : (activeSub.subType === '10 حصص' ? 10 : (activeSub.subType === '12 حصة' ? 12 : (activeSub.subType === '16 حصة' ? 16 : 'مفتوح')));
+
+          totalMonthlyAttendancesCost += 60;
+          monthlyAttendancesList.push(
+            <div
+              key={`att-${p.id}`}
+              className="input-bg rounded-lg p-3 text-right shadow-sm border border-theme relative mb-3 bg-blue-950/5 border-blue-900/20"
+            >
+              <div className="border-b border-theme pb-2 mb-2 pr-2">
+                <div className="font-bold text-primary text-sm">
+                  اللاعب: <span className="text-primary-light">[#{p.number}] {p.name}</span>
+                </div>
+                <span className="text-blue-400 font-bold bg-blue-950/40 border border-blue-900/30 px-2 py-0.5 rounded text-[10px] mt-1 inline-block">
+                  حضور: الحصة {sessionNumber} من {maxSessions} ({activeSub.subType})
+                </span>
+              </div>
+              <div className="flex justify-between text-xs px-1">
+                <div>
+                  <span className="text-muted mb-1 block">المبلغ المدفوع اليوم</span>
+                  <span className="text-success font-bold text-sm">0 ج</span>
+                </div>
+                <div>
+                  <span className="text-muted mb-1 block">تكلفة الجيم</span>
+                  <span className="text-danger font-bold text-sm">60 ج</span>
+                </div>
+                <div>
+                  <span className="text-primary mb-1 block">صافي الربح اليوم</span>
+                  <span className="text-danger font-bold text-sm">-60 ج</span>
+                </div>
+              </div>
+            </div>
+          );
+        }
       }
     });
 
-    if (monthlyList.length === 0 && dailyList.length === 0) {
+    if (monthlyPaymentsList.length === 0 && monthlyAttendancesList.length === 0 && dailySessionsList.length === 0) {
       return <div className="text-center text-muted py-6">لا توجد تفاصيل أو معاملات مسجلة في هذا اليوم.</div>;
     }
 
     return (
       <div className="space-y-4">
-        {/* Section 1: Monthly Subscriptions */}
+        {/* Section 1: Monthly Subscription Payments */}
         {!showOnlyDaily && (
           <div className="space-y-2">
-            <div className="flex justify-between items-center bg-blue-900/10 border border-blue-500/20 px-3 py-2 rounded-lg">
-              <span className="text-sm font-bold text-blue-400">💳 دفعات الاشتراكات الشهرية</span>
-              <span className="bg-blue-900/40 text-blue-300 text-xs font-black px-2.5 py-1 rounded-full">
-                إجمالي دخل الشهر: {monthlyTotalRevenue} ج.م
+            <div className="flex justify-between items-center bg-blue-900/20 border border-blue-500/30 px-3 py-2 rounded-lg">
+              <span className="text-sm font-bold text-blue-400">💳 دفعات الاشتراكات الشهرية (تجديد/تفعيل)</span>
+              <span className="bg-blue-900/60 text-blue-300 text-xs font-black px-2.5 py-1 rounded-full">
+                إجمالي المحصل: {totalMonthlyPayments} ج.م
               </span>
             </div>
-            {monthlyList.length === 0 ? (
-              <div className="text-center text-xs text-muted/60 py-3 border border-dashed border-theme rounded-lg">
-                لا توجد دفعات اشتراك شهري في هذا اليوم.
+            {monthlyPaymentsList.length === 0 ? (
+              <div className="text-center text-xs text-muted/60 py-3 border border-dashed border-blue-900/20 rounded-lg">
+                لا توجد دفعات اشتراك شهري اليوم.
               </div>
             ) : (
-              <div>{monthlyList}</div>
+              <div>{monthlyPaymentsList}</div>
             )}
           </div>
         )}
 
-        {/* Section 2: Daily Sessions */}
+        {/* Section 2: Monthly Subscribers Attendance */}
+        {!showOnlyDaily && (
+          <div className="space-y-2">
+            <div className="flex justify-between items-center bg-cyan-900/20 border border-cyan-500/30 px-3 py-2 rounded-lg">
+              <span className="text-sm font-bold text-cyan-400">👥 حضور المشتركين شهرياً اليوم</span>
+              <span className="bg-cyan-900/60 text-cyan-300 text-xs font-black px-2.5 py-1 rounded-full">
+                تكلفة الجيم الإجمالية: {totalMonthlyAttendancesCost} ج.م
+              </span>
+            </div>
+            {monthlyAttendancesList.length === 0 ? (
+              <div className="text-center text-xs text-muted/60 py-3 border border-dashed border-cyan-900/20 rounded-lg">
+                لا يوجد حضور للمشتركين شهرياً اليوم.
+              </div>
+            ) : (
+              <div>{monthlyAttendancesList}</div>
+            )}
+          </div>
+        )}
+
+        {/* Section 3: Daily Sessions */}
         <div className="space-y-2">
           <div className="flex justify-between items-center bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-lg">
-            <span className="text-sm font-bold text-amber-400">🎯 دفعات الحصص اليومية</span>
+            <span className="text-sm font-bold text-amber-400">🎯 حضور ودفعات الحصص اليومية</span>
             <span className="bg-amber-500/20 text-amber-400 text-xs font-black px-2.5 py-1 rounded-full">
-              إجمالي دخل الحصص: {dailyTotalRevenue} ج.م
+              إجمالي المحصل: {totalDailyPayments} ج.م
             </span>
           </div>
-          {dailyList.length === 0 ? (
+          {dailySessionsList.length === 0 ? (
             <div className="text-center text-xs text-muted/60 py-3 border border-dashed border-theme rounded-lg">
-              لا توجد دفعات حصص يومية في هذا اليوم.
+              لا توجد دفعات أو حضور حصص يومية اليوم.
             </div>
           ) : (
-            <div>{dailyList}</div>
+            <div>{dailySessionsList}</div>
           )}
         </div>
       </div>
