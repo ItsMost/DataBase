@@ -39,14 +39,9 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
   const dailySessionRevenues: { [date: string]: number } = {};
   const dailySessionCosts: { [date: string]: number } = {};
   const dailySessionCounts: { [date: string]: number } = {};
-  const dailyExpenses: { [date: string]: number } = {};
 
   players.forEach(p => {
-    if (p.isSystem) {
-      p.history?.forEach(h => {
-        dailyExpenses[h.date] = (dailyExpenses[h.date] || 0) + (h.cost || 0);
-      });
-    } else {
+    if (!p.isSystem) {
       p.history?.forEach(h => {
         if (h.subType === 'حصة واحدة') {
           dailySessionRevenues[h.date] = (dailySessionRevenues[h.date] || 0) + (h.paid || 0);
@@ -82,8 +77,7 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
   });
 
   const dailyDates = Object.keys(dailySessionRevenues);
-  const expenseDates = Object.keys(dailyExpenses);
-  const allHistoricalDates = [...new Set([...dailyDates, ...expenseDates])].sort();
+  const allHistoricalDates = [...new Set(dailyDates)].sort();
 
   // Compute daily averages over the last 14 days
   const last14Dates = allHistoricalDates.slice(-14);
@@ -92,19 +86,16 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
   let totalHistDailyRev = 0;
   let totalHistDailyCost = 0;
   let totalHistDailyCount = 0;
-  let totalHistDailyExp = 0;
 
   last14Dates.forEach(d => {
     totalHistDailyRev += dailySessionRevenues[d] || 0;
     totalHistDailyCost += dailySessionCosts[d] || 0;
     totalHistDailyCount += dailySessionCounts[d] || 0;
-    totalHistDailyExp += dailyExpenses[d] || 0;
   });
 
   const avgDailySessionRevenue = totalHistDailyRev / activeDaysCount;
   const avgDailySessionCost = totalHistDailyCost / activeDaysCount;
   const avgDailySessionCount = totalHistDailyCount / activeDaysCount;
-  const avgDailyExpense = totalHistDailyExp / activeDaysCount;
 
   // --- TODAY'S PROJECTION (اليوم) ---
   const attendedToday = players.filter(
@@ -114,16 +105,9 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
 
   let actualRevToday = 0;
   let actualCostToday = 0;
-  let expensesToday = 0;
 
   players.forEach(p => {
-    if (p.isSystem) {
-      p.history?.forEach(h => {
-        if (h.date === getTodayDate()) {
-          expensesToday += h.cost || 0;
-        }
-      });
-    } else {
+    if (!p.isSystem) {
       p.history?.forEach(h => {
         if (h.date === getTodayDate()) {
           actualRevToday += h.paid || 0;
@@ -154,14 +138,18 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
 
   const todayRevForecast = actualRevToday + expectedRevToday;
   const todayCostForecast = actualCostToday + expectedCostToday;
-  const todayProfitForecast = todayRevForecast - todayCostForecast - expensesToday;
+  const todayProfitForecast = todayRevForecast - todayCostForecast;
   const todayPeopleForecast = attendedTodayCount + expectedAttendeesCount;
 
   // --- WEEKLY PROJECTION (الأسبوع) ---
   const expiringPlayersNext7 = players.filter(p => {
     if (p.isSystem || p.isDeleted || !p.subType || p.subType === 'حصة واحدة') return false;
     const exp = checkExpiration(p);
-    return exp.isExpired || exp.days <= 7;
+    if (exp.isExpired) {
+      return exp.days <= 14; // Expired but within last 14 days
+    } else {
+      return exp.days <= 7; // Expiring in next 7 days
+    }
   });
 
   let expectedWeeklyRenewalRevenue = 0;
@@ -176,8 +164,7 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
 
   const weeklyRevForecast = expectedWeeklyRenewalRevenue + weeklyDailySessionsRev;
   const weeklyCostForecast = expectedWeeklyRenewalCost + weeklyDailySessionsCost;
-  const weeklyExpensesForecast = avgDailyExpense * 7;
-  const weeklyProfitForecast = weeklyRevForecast - weeklyCostForecast - weeklyExpensesForecast;
+  const weeklyProfitForecast = weeklyRevForecast - weeklyCostForecast;
 
   const activeMonthlyMembersCount = players.filter(
     p => !p.isSystem && !p.isDeleted && p.subType && p.subType !== 'حصة واحدة' && !checkExpiration(p).isExpired
@@ -185,9 +172,12 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
   const weeklyPeopleForecast = Math.round(activeMonthlyMembersCount * 1.5 + avgDailySessionCount * 7);
 
   // --- MONTHLY PROJECTION (الشهر) ---
-  const activeMonthlyMembers = players.filter(
-    p => !p.isSystem && !p.isDeleted && p.subType && p.subType !== 'حصة واحدة'
-  );
+  const activeMonthlyMembers = players.filter(p => {
+    if (p.isSystem || p.isDeleted || !p.subType || p.subType === 'حصة واحدة') return false;
+    const exp = checkExpiration(p);
+    // Include if not expired OR expired but within last 14 days
+    return !exp.isExpired || exp.days <= 14;
+  });
 
   let expectedMonthlyRenewalRevenue = 0;
   let expectedMonthlyRenewalCost = 0;
@@ -201,13 +191,19 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
 
   const monthlyRevForecast = expectedMonthlyRenewalRevenue + monthlyDailySessionsRev;
   const monthlyCostForecast = expectedMonthlyRenewalCost + monthlyDailySessionsCost;
-  const monthlyExpensesForecast = avgDailyExpense * 30;
-  const monthlyProfitForecast = monthlyRevForecast - monthlyCostForecast - monthlyExpensesForecast;
+  const monthlyProfitForecast = monthlyRevForecast - monthlyCostForecast;
 
   const monthlyPeopleForecast = Math.round(activeMonthlyMembers.length * 6 + avgDailySessionCount * 30);
 
   // Target footfall calculation today
   const targetAttendanceProgress = todayPeopleForecast > 0 ? (attendedTodayCount / todayPeopleForecast) * 100 : 0;
+
+  // Split renewing players into Overdue (expired <= 14 days) and Upcoming (expires <= 7 days)
+  const overduePlayers = expiringPlayersNext7.filter(p => checkExpiration(p).isExpired);
+  const upcomingRenewals = expiringPlayersNext7.filter(p => !checkExpiration(p).isExpired);
+
+  const overdueRevenue = overduePlayers.reduce((sum, p) => sum + (p.paid || 0), 0);
+  const upcomingRevenue = upcomingRenewals.reduce((sum, p) => sum + (p.paid || 0), 0);
 
   return (
     <div className="space-y-6 px-4 pb-8">
@@ -314,40 +310,90 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
         </div>
       </div>
 
-      {/* 3. Upcoming Renewals (Expected incoming cash within 7 days) */}
-      <div className="card-bg rounded-lg p-5 border-t-2 border-amber-500 relative">
-        <h3 className="text-sm font-bold text-amber-400 mb-3 flex items-center gap-1.5 glow-text pr-2">
-          💰 التجديدات والتدفقات المالية المنتظرة (خلال 7 أيام)
+      {/* 3. Upcoming Renewals */}
+      <div className="card-bg rounded-lg p-5 border-t-2 border-amber-500 relative space-y-4">
+        <h3 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-1.5 glow-text pr-2 border-b border-theme/30 pb-2">
+          💰 التجديدات والتدفقات المالية المنتظرة
         </h3>
         
-        <div className="max-h-56 overflow-y-auto pr-1 space-y-2">
-          {expiringPlayersNext7.length === 0 ? (
-            <div className="text-xs text-muted text-center py-4 border border-dashed border-theme rounded">
-              لا توجد اشتراكات شهرية شارفت على الانتهاء في الـ 7 أيام القادمة.
+        <div className="max-h-96 overflow-y-auto pr-1 space-y-4">
+          {/* 3.1 Overdue Section */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-center bg-red-950/20 border border-red-500/20 px-3 py-2 rounded-lg">
+              <span className="text-xs font-bold text-red-400">🚨 لاعبون متأخرون عن الدفع (انتهى اشتراكهم خلال آخر 14 يوم)</span>
+              <span className="bg-red-950/40 text-red-300 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                إجمالي المتوقع: {overdueRevenue} ج.م
+              </span>
             </div>
-          ) : (
-            expiringPlayersNext7.map(p => {
-              const exp = checkExpiration(p);
-              const renewAmount = p.paid || 0;
-              return (
-                <div
-                  key={p.id}
-                  className="input-bg rounded p-2.5 flex justify-between items-center border border-theme/50 hover:border-amber-500/30 transition-all text-xs"
-                >
-                  <div className="text-right">
-                    <span className="font-bold text-main block text-xs">[#{p.number}] {p.name}</span>
-                    <span className="text-muted block text-[10px] mt-0.5">الرياضة: {p.sport || 'General'}</span>
-                  </div>
-                  <div className="text-left">
-                    <span className="text-amber-400 font-bold block text-xs">+{renewAmount} ج متوقعة</span>
-                    <span className={`text-[10px] block mt-0.5 ${exp.isExpired ? 'text-danger font-semibold' : 'text-success'}`}>
-                      {exp.isExpired ? 'منتهي بالفعل' : `ينتهي خلال ${exp.days} أيام`}
-                    </span>
-                  </div>
+            <div className="space-y-1.5 pr-1">
+              {overduePlayers.length === 0 ? (
+                <div className="text-[10px] text-muted text-center py-4 border border-dashed border-theme/40 rounded bg-black/5">
+                  لا يوجد متأخرون عن الدفع حالياً.
                 </div>
-              );
-            })
-          )}
+              ) : (
+                overduePlayers.map(p => {
+                  const exp = checkExpiration(p);
+                  const renewAmount = p.paid || 0;
+                  return (
+                    <div
+                      key={p.id}
+                      className="input-bg rounded p-2.5 flex justify-between items-center border border-theme/50 hover:border-red-500/20 transition-all text-xs animate-fadeIn"
+                    >
+                      <div className="text-right">
+                        <span className="font-bold text-main block text-xs">[#{p.number}] {p.name}</span>
+                        <span className="text-muted block text-[10px] mt-0.5">الجروب: {p.sport || 'العام'}</span>
+                      </div>
+                      <div className="text-left">
+                        <span className="text-red-400 font-bold block text-xs">+{renewAmount} ج متوقعة</span>
+                        <span className="text-[10px] block mt-0.5 text-danger font-semibold">
+                          منتهي منذ {exp.days} أيام
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* 3.2 Upcoming Section */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-center bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-lg">
+              <span className="text-xs font-bold text-amber-400">📅 اشتراكات تنتهي قريباً (خلال 7 أيام قادمة)</span>
+              <span className="bg-amber-500/20 text-amber-400 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                إجمالي المتوقع: {upcomingRevenue} ج.م
+              </span>
+            </div>
+            <div className="space-y-1.5 pr-1">
+              {upcomingRenewals.length === 0 ? (
+                <div className="text-[10px] text-muted text-center py-4 border border-dashed border-theme/40 rounded bg-black/5">
+                  لا توجد اشتراكات ستنتهي خلال 7 أيام قادمة.
+                </div>
+              ) : (
+                upcomingRenewals.map(p => {
+                  const exp = checkExpiration(p);
+                  const renewAmount = p.paid || 0;
+                  return (
+                    <div
+                      key={p.id}
+                      className="input-bg rounded p-2.5 flex justify-between items-center border border-theme/50 hover:border-amber-500/20 transition-all text-xs animate-fadeIn"
+                    >
+                      <div className="text-right">
+                        <span className="font-bold text-main block text-xs">[#{p.number}] {p.name}</span>
+                        <span className="text-muted block text-[10px] mt-0.5">الجروب: {p.sport || 'العام'}</span>
+                      </div>
+                      <div className="text-left">
+                        <span className="text-amber-400 font-bold block text-xs">+{renewAmount} ج متوقعة</span>
+                        <span className="text-[10px] block mt-0.5 text-success">
+                          ينتهي خلال {exp.days} أيام
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
