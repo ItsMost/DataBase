@@ -11,7 +11,9 @@ import {
   Legend,
   Filler,
 } from 'chart.js';
-import type { Player, HistoryEntry, PersonalWalletEntry } from '../types';
+import type { Player, HistoryEntry, PersonalWalletEntry, AppSettings } from '../types';
+import { getSettings, analyzePlayer, gymRateAt, EXTRA_PAYMENT, SINGLE_SESSION, getSessionCount } from '../lib/subscription';
+import { SettingsPanel } from './SettingsPanel';
 
 ChartJS.register(
   CategoryScale,
@@ -41,6 +43,7 @@ interface ProfileSectionProps {
   currentMonthKey: string;
   onLockMonth: (monthKey: string) => Promise<void>;
   onSignOut: () => Promise<void>;
+  onSaveSettings: (next: AppSettings) => Promise<void>;
 }
 
 export const ProfileSection: React.FC<ProfileSectionProps> = ({
@@ -60,7 +63,9 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   currentMonthKey,
   onLockMonth,
   onSignOut,
+  onSaveSettings,
 }) => {
+  const settings = getSettings(players);
   // Advanced settings: month lock confirmation
   const [showLockModal, setShowLockModal] = useState(false);
   const [lockConfirmText, setLockConfirmText] = useState('');
@@ -212,7 +217,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
             monthlyStats[monthKey].profit += (h.paid || 0) - (h.cost || 0);
             monthlyStats[monthKey].count++;
             
-            if (h.subType && h.subType !== 'حصة واحدة') {
+            if (h.subType && h.subType !== SINGLE_SESSION && h.subType !== EXTRA_PAYMENT) {
               monthlyStats[monthKey].monthSubCount++;
             }
 
@@ -274,29 +279,11 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
             }
             dailyStats[dayKey].totalAttendances++;
 
-            // Gym business logic: Charge 60 if attendance has no corresponding active monthly subscription OR paid daily session on this day
-            let isMonthly = false;
-            let hasPaidDailyToday = false;
-            if (p.history) {
-              // Check if they paid for a daily session today to avoid double-counting daily gym costs
-              hasPaidDailyToday = p.history.some(h => h.date === attDateStr && h.subType === 'حصة واحدة');
-
-              const pastHistories = p.history
-                .filter(h => h.date <= attDateStr)
-                .sort((a, b) => b.date.localeCompare(a.date));
-              
-              if (pastHistories.length > 0 && pastHistories[0].subType !== 'حصة واحدة') {
-                // Check if attDateStr is within 1 month of the monthly subscription start date
-                const startDate = new Date(pastHistories[0].date);
-                const endDate = new Date(startDate);
-                endDate.setMonth(endDate.getMonth() + 1);
-                
-                const attDate = new Date(attDateStr);
-                if (attDate <= endDate) {
-                  isMonthly = true;
-                }
-              }
-            }
+            // Gym money for this attendance from the shared engine (old rule before the cutoff,
+            // extra sessions after it). Same number as the top profit card.
+            const attInfo = analyzePlayer(p, settings).attendance.get(attDateStr);
+            const isMonthly = attInfo?.kind === 'package';
+            const attCharge = attInfo?.charge ?? 0;
 
             if (isMonthly) {
               dailyStats[dayKey].monthlyAttendances++;
@@ -304,12 +291,12 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
               dailyStats[dayKey].dailyAttendances++;
             }
 
-            if (!isMonthly && !hasPaidDailyToday) {
-              dailyStats[dayKey].cost += 60;
-              dailyStats[dayKey].dailyCost += 60; // Include in daily cost breakdown
-              dailyStats[dayKey].profit -= 60;
-              monthlyStats[monthKey].cost += 60;
-              monthlyStats[monthKey].profit -= 60;
+            if (attCharge > 0) {
+              dailyStats[dayKey].cost += attCharge;
+              dailyStats[dayKey].dailyCost += attCharge; // Include in daily cost breakdown
+              dailyStats[dayKey].profit -= attCharge;
+              monthlyStats[monthKey].cost += attCharge;
+              monthlyStats[monthKey].profit -= attCharge;
             }
           });
         }
@@ -487,6 +474,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
     let totalDailyPayments = 0;
 
     const showOnlyDaily = excludeMonthlyDays[selectedDayKey] || false;
+    const dayRate = gymRateAt(settings, selectedDayKey);
 
     players.forEach(p => {
       if (p.isSystem) {
@@ -503,7 +491,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
 
           if (isDailySession) {
             // Daily session represents both payment and attendance
-            const profit = (h.paid || 0) - 60;
+            const profit = (h.paid || 0) - dayRate;
             totalDailyPayments += h.paid || 0;
             dailySessionsList.push(
               <div
@@ -534,7 +522,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                   </div>
                   <div>
                     <span className="text-muted mb-1 block">تكلفة الجيم</span>
-                    <span className="text-danger font-bold text-sm">60 ج</span>
+                    <span className="text-danger font-bold text-sm">{dayRate} ج</span>
                   </div>
                   <div>
                     <span className="text-primary mb-1 block">صافي الربح</span>
@@ -565,7 +553,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                     اللاعب: <span className="text-primary-light">[#{p.number}] {p.name}</span>
                   </div>
                   <span className="text-primary font-bold bg-primary-glow px-2 py-0.5 rounded text-[10px] mt-1 inline-block">
-                    تفعيل اشتراك: {h.subType}
+                    {h.subType === EXTRA_PAYMENT ? `دفع ${h.desc || h.subType}` : `تفعيل اشتراك: ${h.subType}`}
                   </span>
                 </div>
                 <div className="flex justify-between text-xs px-1">
@@ -590,39 +578,16 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
 
       // 2. Process attendances on this day:
       if (!showOnlyDaily && p.attendance?.includes(selectedDayKey)) {
-        // Check if this attendance is under an active monthly subscription on this day.
-        let isMonthly = false;
-        let activeSub: any = null;
-
-        if (p.history) {
-          const pastHistories = p.history
-            .filter(h => h.date <= selectedDayKey)
-            .sort((a, b) => b.date.localeCompare(a.date));
-          
-          if (pastHistories.length > 0 && pastHistories[0].subType !== 'حصة واحدة') {
-            const startDate = new Date(pastHistories[0].date);
-            const endDate = new Date(startDate);
-            endDate.setMonth(endDate.getMonth() + 1);
-            
-            const attDate = new Date(selectedDayKey);
-            if (attDate <= endDate) {
-              isMonthly = true;
-              activeSub = pastHistories[0];
-            }
-          }
-        }
+        // Same classification as the reports (shared engine)
+        const dayInfo = analyzePlayer(p, settings).attendance.get(selectedDayKey);
+        const isMonthly = dayInfo?.kind === 'package';
+        const activeSub: any = dayInfo?.sub || null;
 
         if (isMonthly && activeSub) {
-          // Calculate which session number this is under the active subscription:
-          // Count attendances between activeSub.date and selectedDayKey (inclusive)
-          const subAttendances = p.attendance
-            .filter(d => d >= activeSub.date && d <= selectedDayKey)
-            .sort((a, b) => a.localeCompare(b));
-          
-          const sessionNumber = subAttendances.indexOf(selectedDayKey) + 1;
-          const maxSessions = activeSub.subType === '8 حصص' ? 8 : (activeSub.subType === '10 حصص' ? 10 : (activeSub.subType === '12 حصة' ? 12 : (activeSub.subType === '16 حصة' ? 16 : 'مفتوح')));
+          const sessionNumber = dayInfo?.sessionNumber ?? 1;
+          const maxSessions = getSessionCount(activeSub.subType) || 'مفتوح';
 
-          totalMonthlyAttendancesCost += 60;
+          totalMonthlyAttendancesCost += dayRate;
           monthlyAttendancesList.push(
             <div
               key={`att-${p.id}`}
@@ -643,11 +608,11 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                 </div>
                 <div>
                   <span className="text-muted mb-1 block">تكلفة الجيم</span>
-                  <span className="text-danger font-bold text-sm">60 ج</span>
+                  <span className="text-danger font-bold text-sm">{dayRate} ج</span>
                 </div>
                 <div>
                   <span className="text-primary mb-1 block">صافي الربح اليوم</span>
-                  <span className="text-danger font-bold text-sm">-60 ج</span>
+                  <span className="text-danger font-bold text-sm">-{dayRate} ج</span>
                 </div>
               </div>
             </div>
@@ -1111,7 +1076,8 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                 const showOnlyDaily = excludeMonthlyDays[key] || false;
                 const dispRevenue = showOnlyDaily ? stat.dailyRevenue : stat.revenue;
                 // Gym money calculation: totalAttendances * 60 for All mode, dailyAttendances * 60 for Daily Sessions only mode
-                const dispCost = showOnlyDaily ? (stat.dailyAttendances * 60) : (stat.totalAttendances * 60);
+                const keyRate = gymRateAt(settings, key);
+                const dispCost = showOnlyDaily ? (stat.dailyAttendances * keyRate) : (stat.totalAttendances * keyRate);
                 const dispProfit = dispRevenue - dispCost;
                 const dispPaymentCount = showOnlyDaily ? stat.dailyPaymentCount : stat.paymentCount;
                 const dispAttendanceCount = showOnlyDaily ? stat.dailyAttendances : stat.totalAttendances;
@@ -1347,6 +1313,8 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
       {/* Advanced settings */}
       <div className="card-bg rounded-lg p-5 border-t-2 border-slate-500 relative animate-fadeIn">
         <h2 className="text-lg font-bold text-main mb-4 flex items-center">⚙️ إعدادات متقدمة</h2>
+
+        <SettingsPanel settings={settings} onSave={onSaveSettings} />
 
         <div className="input-bg rounded-lg border border-theme p-4 mb-4">
           <div className="font-black text-amber-400 mb-1">🔒 قفل الشهر ({currentMonthKey})</div>

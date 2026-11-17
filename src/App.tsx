@@ -26,7 +26,20 @@ import {
 } from './supabase';
 
 const MONTH_LOCKS_ID = 'sys_month_locks';
-import type { Player, HistoryEntry, ExpectedAttendee, PersonalWalletEntry } from './types';
+import type { Player, HistoryEntry, ExpectedAttendee, PersonalWalletEntry, AppSettings, EndMode } from './types';
+import {
+  SETTINGS_ID,
+  SINGLE_SESSION,
+  EXTRA_PAYMENT,
+  DEFAULT_PLACE,
+  ATTEND_ONLY_TYPES,
+  getSettings,
+  analyzePlayer,
+  computeMonthlyTotals,
+  suggestGymCost,
+  isPackageType,
+  packageStart,
+} from './lib/subscription';
 
 interface SidebarWidgetProps {
   currentProfit: number;
@@ -226,6 +239,7 @@ export const App: React.FC = () => {
   
   // Roster / payment linking state
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
+  const [payRequestPlayerId, setPayRequestPlayerId] = useState<string | null>(null);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
 
   // Toast Notification state
@@ -441,6 +455,20 @@ export const App: React.FC = () => {
             setWalletEntries(syncedWallet);
           }
 
+          // Save the cutoff date for the new accounting rules once (synced to all devices).
+          // Attendances before it keep the old calculation, so past months never change.
+          const settingsRec = await db.players.get(SETTINGS_ID);
+          if (!settingsRec?.settings?.v2From) {
+            const base = settingsRec?.settings || getSettings([]);
+            await syncPlayerToCloud({
+              ...(settingsRec || { id: SETTINGS_ID, isSystem: true, name: 'الإعدادات', history: [] }),
+              id: SETTINGS_ID,
+              isSystem: true,
+              settings: { ...base, v2From: todayStr },
+            });
+            setPlayers(await db.players.toArray());
+          }
+
           // Weekly automatic backup (read-only snapshot to private Storage bucket)
           runWeeklyBackupIfDue();
         }, 1000);
@@ -553,28 +581,9 @@ export const App: React.FC = () => {
     return new Date(d.getTime() - offset).toISOString().split('T')[0];
   };
 
-  const checkExpiration = (player: Player) => {
-    if (!player.startDate || !player.subType) return { isExpired: true, days: 0, endDateStr: '-' };
-    const startD = new Date(player.startDate);
-    const endD = new Date(startD);
-    
-    if (player.subType === 'حصة واحدة') {
-      endD.setDate(endD.getDate() + 1);
-    } else {
-      endD.setMonth(endD.getMonth() + 1);
-    }
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    endD.setHours(0, 0, 0, 0);
-    const diffTime = today.getTime() - endD.getTime();
-    
-    return {
-      isExpired: diffTime > 0,
-      days: diffTime > 0 ? Math.floor(diffTime / (1000 * 60 * 60 * 24)) : 0,
-      endDateStr: endD.toLocaleDateString('en-GB'),
-    };
-  };
+  // One expiry/status function for every tab (src/lib/subscription.ts)
+  const appSettings = getSettings(players);
+  const checkExpiration = (player: Player) => analyzePlayer(player, appSettings).status;
 
   // --- Core CRUD Actions ---
 
@@ -854,41 +863,71 @@ export const App: React.FC = () => {
   // Save Subscription Payment details
   const handleSaveSubscription = async (
     playerId: string,
-    subData: { subType: string; startDate: string; paid: number; cost: number },
+    subData: {
+      subType: string;
+      startDate: string;
+      paid: number;
+      cost: number;
+      endMode?: EndMode;
+      place?: string;
+      absorbedExtras?: { date: string; gym: number }[];
+    },
     isEdit = false
   ) => {
     const p = await db.players.get(playerId);
     if (!p) return;
 
-    let history = p.history ? [...p.history] : [];
-    
-    if (isEdit && history.length > 0) {
-      // Edit the last history entry (which represents the current subscription)
-      const lastIdx = history.length - 1;
-      history[lastIdx] = {
-        ...history[lastIdx],
-        date: subData.startDate,
+    const history = p.history ? [...p.history] : [];
+    const endMode = isPackageType(subData.subType) ? (subData.endMode || 'sessions') : undefined;
+    const place = (subData.place || '').trim() || DEFAULT_PLACE;
+
+    // Index of the entry that represents the current subscription (never a "حصص زيادة" payment)
+    let editIdx = -1;
+    if (isEdit) {
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].subType !== EXTRA_PAYMENT) {
+          editIdx = i;
+          break;
+        }
+      }
+    }
+
+    if (isEdit && editIdx >= 0) {
+      const old = history[editIdx];
+      history[editIdx] = {
+        ...old,
+        // A full renewal keeps its payment day; only the counting start moves
+        ...(old.coverFrom ? { coverFrom: subData.startDate } : { date: subData.startDate }),
         subType: subData.subType,
         paid: subData.paid,
         cost: subData.cost,
         desc: subData.subType,
-        // Keep the original timestamp to preserve order
+        endMode,
+        place,
+        // Keep the original timestamp (and any absorbed extras) to preserve order
       };
     } else {
-      // Append a new history entry
+      const absorbing = !!(subData.absorbedExtras && subData.absorbedExtras.length > 0);
       const newHistoryEntry: HistoryEntry = {
-        date: subData.startDate,
+        // Full renewal: money is recorded today (this month's report); sessions count from the first extra
+        date: absorbing ? getTodayDate() : subData.startDate,
         subType: subData.subType,
         paid: subData.paid,
         cost: subData.cost,
         timestamp: Date.now(),
         desc: subData.subType,
+        endMode,
+        place,
       };
+      if (absorbing) {
+        newHistoryEntry.coverFrom = subData.startDate;
+        newHistoryEntry.absorbedExtras = subData.absorbedExtras;
+      }
       history.push(newHistoryEntry);
     }
 
     const attendance = p.attendance ? [...p.attendance] : [];
-    if (subData.subType === 'حصة واحدة') {
+    if (subData.subType === SINGLE_SESSION) {
       if (!attendance.includes(subData.startDate)) {
         attendance.push(subData.startDate);
       }
@@ -900,6 +939,7 @@ export const App: React.FC = () => {
       startDate: subData.startDate,
       paid: subData.paid,
       cost: subData.cost,
+      endMode,
       history,
       attendance,
     };
@@ -908,6 +948,44 @@ export const App: React.FC = () => {
     const updatedList = await db.players.toArray();
     setPlayers(updatedList);
     triggerToast(isEdit ? "تم تعديل الاشتراك والدفعة بنجاح ✏️" : "تم تسجيل الدفع وتنشيط الاشتراك بنجاح ✅");
+  };
+
+  // Pay only the extra sessions: records a "حصص زيادة" payment and clears the balance.
+  // Gym money for those sessions was already counted on the day they were attended, so cost = 0.
+  const handlePayExtras = async (playerId: string, amount: number, extraDates: string[], place?: string) => {
+    const p = await db.players.get(playerId);
+    if (!p || extraDates.length === 0) return;
+
+    const entry: HistoryEntry = {
+      date: getTodayDate(),
+      subType: EXTRA_PAYMENT,
+      desc: `${EXTRA_PAYMENT} (${extraDates.length})`,
+      paid: amount,
+      cost: 0,
+      timestamp: Date.now(),
+      settledExtras: [...extraDates],
+      place: (place || '').trim() || DEFAULT_PLACE,
+    };
+
+    await syncPlayerToCloud({ ...p, history: [...(p.history || []), entry] });
+    const updatedList = await db.players.toArray();
+    setPlayers(updatedList);
+    triggerToast(`تم تسجيل دفع ${extraDates.length} حصص زيادة (${amount} ج) ✅`);
+  };
+
+  // Settings (gym share per session + discount table), synced as a system record
+  const handleSaveSettings = async (next: AppSettings) => {
+    const existing = await db.players.get(SETTINGS_ID);
+    const record: Player = {
+      ...(existing || { id: SETTINGS_ID, isSystem: true, name: 'الإعدادات', history: [] }),
+      id: SETTINGS_ID,
+      isSystem: true,
+      settings: { ...next, v2From: existing?.settings?.v2From || next.v2From || getTodayDate() },
+    };
+    await syncPlayerToCloud(record);
+    const updatedList = await db.players.toArray();
+    setPlayers(updatedList);
+    triggerToast('تم حفظ الإعدادات ✅');
   };
 
   // Cancel Active Subscription
@@ -1046,22 +1124,25 @@ export const App: React.FC = () => {
     let startDate = p.startDate;
     let paid = p.paid;
     let cost = p.cost;
+    let endMode = p.endMode;
     let attendance = p.attendance ? [...p.attendance] : [];
 
     // If we deleted the active subscription (usually matches current subscription parameters)
     const isCurrentSub = p.subType === deletedEntry?.subType && 
-                         p.startDate === deletedEntry?.date && 
+                         p.startDate === (deletedEntry ? packageStart(deletedEntry) : undefined) && 
                          p.paid === deletedEntry?.paid && 
                          p.cost === deletedEntry?.cost;
 
+    const subEntries = history.filter(h => h.subType !== EXTRA_PAYMENT);
     if (isCurrentSub) {
-      if (history.length > 0) {
-        // Revert to the previous history entry
-        const prevEntry = history[history.length - 1];
+      if (subEntries.length > 0) {
+        // Revert to the previous subscription entry (skip "حصص زيادة" payments)
+        const prevEntry = subEntries[subEntries.length - 1];
         subType = prevEntry.subType;
-        startDate = prevEntry.date;
+        startDate = packageStart(prevEntry);
         paid = prevEntry.paid;
         cost = prevEntry.cost;
+        endMode = prevEntry.endMode;
       } else {
         // Reset if no history left
         subType = '';
@@ -1082,6 +1163,7 @@ export const App: React.FC = () => {
       startDate,
       paid,
       cost,
+      endMode,
       history,
       attendance,
       last_updated: Date.now(),
@@ -1154,7 +1236,7 @@ export const App: React.FC = () => {
     }
 
     // 2. Register attendance or subscription / payment for them
-    if (attendee.subType === 'حضور فقط (مشترك شهرياً)' || attendee.subType === 'حضور فقط') {
+    if (ATTEND_ONLY_TYPES.includes(attendee.subType)) {
       const attendance = player.attendance ? [...player.attendance] : [];
       if (!attendance.includes(attendee.date)) {
         attendance.push(attendee.date);
@@ -1169,9 +1251,14 @@ export const App: React.FC = () => {
         date: attendee.date,
         subType: attendee.subType,
         paid: attendee.paid,
-        cost: attendee.subType === 'حصة واحدة' ? 60 : (attendee.subType === '8 حصص' ? 480 : (attendee.subType === '10 حصص' ? 600 : (attendee.subType === '12 حصة' ? 720 : (attendee.subType === '16 حصة' ? 960 : 1200)))), // Default cost
+        // Gym/place money typed by the coach; old expected rows fall back to the suggestion
+        cost: typeof attendee.cost === 'number'
+          ? attendee.cost
+          : suggestGymCost(appSettings, attendee.subType, attendee.paid || 0, attendee.date),
         timestamp: Date.now(),
         desc: attendee.subType,
+        endMode: isPackageType(attendee.subType) ? (attendee.endMode || 'sessions') : undefined,
+        place: (attendee.place || '').trim() || DEFAULT_PLACE,
       };
 
       const attendance = player.attendance ? [...player.attendance] : [];
@@ -1185,6 +1272,7 @@ export const App: React.FC = () => {
         startDate: attendee.date,
         paid: attendee.paid,
         cost: newHistoryEntry.cost,
+        endMode: newHistoryEntry.endMode,
         history: player.history ? [...player.history, newHistoryEntry] : [newHistoryEntry],
         attendance,
       };
@@ -1419,79 +1507,16 @@ export const App: React.FC = () => {
   };
 
   // --- Shared computed stats for Header dashboard ---
+  const monthlyTotals = computeMonthlyTotals(players, appSettings);
+  const currentMonthKeyForStats = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+
   const getCurrentMonthBenefit = () => {
-    const currMonth = new Date().getMonth();
-    const currYear = new Date().getFullYear();
-    let totalRevenue = 0;
-    let totalGymCost = 0;
-    let totalExpenses = 0;
-
-    players.forEach(p => {
-      if (p.isSystem) {
-        if (p.id !== 'sys_expenses') return;
-        p.history?.forEach(h => {
-          if (!h.date) return;
-          const parts = h.date.split('-');
-          if (parts.length >= 2) {
-            const y = parseInt(parts[0], 10);
-            const m = parseInt(parts[1], 10);
-            if (y === currYear && m === currMonth + 1) {
-              totalExpenses += h.cost || 0;
-            }
-          }
-        });
-      } else {
-        p.history?.forEach(h => {
-          if (!h.date) return;
-          const parts = h.date.split('-');
-          if (parts.length >= 2) {
-            const y = parseInt(parts[0], 10);
-            const m = parseInt(parts[1], 10);
-            if (y === currYear && m === currMonth + 1) {
-              totalRevenue += h.paid || 0;
-              totalGymCost += h.cost || 0;
-            }
-          }
-        });
-
-        p.attendance?.forEach(attDate => {
-          if (!attDate) return;
-          const parts = attDate.split('-');
-          if (parts.length >= 2) {
-            const y = parseInt(parts[0], 10);
-            const m = parseInt(parts[1], 10);
-            if (y === currYear && m === currMonth + 1) {
-              let isMonthly = false;
-              let hasPaidDailyToday = false;
-              if (p.history) {
-                hasPaidDailyToday = p.history.some(h => h.date === attDate && h.subType === 'حصة واحدة');
-                const pastHistories = p.history
-                  .filter(h => h.date <= attDate)
-                  .sort((a, b) => b.date.localeCompare(a.date));
-                if (pastHistories.length > 0 && pastHistories[0].subType !== 'حصة واحدة') {
-                  const start = new Date(pastHistories[0].date);
-                  const end = new Date(start);
-                  end.setMonth(end.getMonth() + 1);
-                  const att = new Date(attDate);
-                  if (att <= end) {
-                    isMonthly = true;
-                  }
-                }
-              }
-              if (!isMonthly && !hasPaidDailyToday) {
-                totalGymCost += 60;
-              }
-            }
-          }
-        });
-      }
-    });
-
+    const m = monthlyTotals[currentMonthKeyForStats] || { revenue: 0, cost: 0, expenses: 0, profit: 0 };
     return {
-      netProfit: totalRevenue - totalGymCost - totalExpenses,
-      revenue: totalRevenue,
-      cost: totalGymCost,
-      expenses: totalExpenses,
+      netProfit: m.revenue - m.cost - m.expenses,
+      revenue: m.revenue,
+      cost: m.cost,
+      expenses: m.expenses,
     };
   };
 
@@ -1503,76 +1528,8 @@ export const App: React.FC = () => {
   const currentMonthLabel = monthNames[new Date().getMonth()];
 
   const getHighestMonthStats = () => {
-    const monthlyStats: { [monthKey: string]: { revenue: number; cost: number; profit: number; expenses: number } } = {};
-    const currMonthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-
-    players.forEach(p => {
-      if (p.isSystem) {
-        if (p.id !== 'sys_expenses') return;
-        p.history?.forEach(h => {
-          if (!h.date) return;
-          const parts = h.date.split('-');
-          if (parts.length < 2) return;
-          const y = parts[0];
-          const m = parts[1];
-          const key = `${y}-${m}`;
-          if (!monthlyStats[key]) {
-            monthlyStats[key] = { revenue: 0, cost: 0, profit: 0, expenses: 0 };
-          }
-          monthlyStats[key].expenses += h.cost || 0;
-          monthlyStats[key].profit -= h.cost || 0;
-        });
-      } else {
-        p.history?.forEach(h => {
-          if (!h.date) return;
-          const parts = h.date.split('-');
-          if (parts.length < 2) return;
-          const y = parts[0];
-          const m = parts[1];
-          const key = `${y}-${m}`;
-          if (!monthlyStats[key]) {
-            monthlyStats[key] = { revenue: 0, cost: 0, profit: 0, expenses: 0 };
-          }
-          monthlyStats[key].revenue += h.paid || 0;
-          monthlyStats[key].cost += h.cost || 0;
-          monthlyStats[key].profit += (h.paid || 0) - (h.cost || 0);
-        });
-
-        p.attendance?.forEach(attDate => {
-          if (!attDate) return;
-          const parts = attDate.split('-');
-          if (parts.length < 2) return;
-          const y = parts[0];
-          const m = parts[1];
-          const key = `${y}-${m}`;
-          if (!monthlyStats[key]) {
-            monthlyStats[key] = { revenue: 0, cost: 0, profit: 0, expenses: 0 };
-          }
-          
-          let isMonthly = false;
-          let hasPaidDailyToday = false;
-          if (p.history) {
-            hasPaidDailyToday = p.history.some(h => h.date === attDate && h.subType === 'حصة واحدة');
-            const pastHistories = p.history
-              .filter(h => h.date <= attDate)
-              .sort((a, b) => b.date.localeCompare(a.date));
-            if (pastHistories.length > 0 && pastHistories[0].subType !== 'حصة واحدة') {
-              const start = new Date(pastHistories[0].date);
-              const end = new Date(start);
-              end.setMonth(end.getMonth() + 1);
-              const att = new Date(attDate);
-              if (att <= end) {
-                isMonthly = true;
-              }
-            }
-          }
-          if (!isMonthly && !hasPaidDailyToday) {
-            monthlyStats[key].cost += 60;
-            monthlyStats[key].profit -= 60;
-          }
-        });
-      }
-    });
+    const monthlyStats = monthlyTotals;
+    const currMonthKey = currentMonthKeyForStats;
 
     let highestProfit = 0;
     let highestMonthKey = 'لا يوجد';
@@ -1876,6 +1833,10 @@ export const App: React.FC = () => {
                 onOpenHistory={setHistoryPlayerId}
                 checkExpiration={checkExpiration}
                 allGroups={allGroups}
+                onPayExtras={(id) => {
+                  setPayRequestPlayerId(id);
+                  setActiveTab('active');
+                }}
               />
             )}
 
@@ -1885,6 +1846,9 @@ export const App: React.FC = () => {
                 selectedPlayerId={selectedPlayerId}
                 setSelectedPlayerId={setSelectedPlayerId}
                 onSaveSubscription={handleSaveSubscription}
+                onPayExtras={handlePayExtras}
+                payRequestPlayerId={payRequestPlayerId}
+                onPayRequestHandled={() => setPayRequestPlayerId(null)}
                 onCancelSubscription={handleCancelSubscription}
                 checkExpiration={checkExpiration}
                 onAddAttendance={handleAddAttendance}
@@ -1931,6 +1895,7 @@ export const App: React.FC = () => {
                 currentMonthKey={currentMonthKey}
                 onLockMonth={handleLockMonth}
                 onSignOut={handleSignOut}
+                onSaveSettings={handleSaveSettings}
               />
             )}
 
