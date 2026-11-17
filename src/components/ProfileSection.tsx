@@ -37,6 +37,10 @@ interface ProfileSectionProps {
   onSaveWalletEntry: (entryData: Omit<PersonalWalletEntry, 'timestamp'>) => Promise<void>;
   onDeleteWalletEntry: (id: string) => Promise<void>;
   onDeletePlayerTransaction: (playerId: string, timestamp: number) => Promise<void>;
+  lockedMonths: string[];
+  currentMonthKey: string;
+  onLockMonth: (monthKey: string) => Promise<void>;
+  onSignOut: () => Promise<void>;
 }
 
 export const ProfileSection: React.FC<ProfileSectionProps> = ({
@@ -52,7 +56,16 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   onSaveWalletEntry,
   onDeleteWalletEntry,
   onDeletePlayerTransaction,
+  lockedMonths,
+  currentMonthKey,
+  onLockMonth,
+  onSignOut,
 }) => {
+  // Advanced settings: month lock confirmation
+  const [showLockModal, setShowLockModal] = useState(false);
+  const [lockConfirmText, setLockConfirmText] = useState('');
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+
   // Expense Form state
   const [expDesc, setExpDesc] = useState('');
   const [expAmount, setExpAmount] = useState('');
@@ -750,7 +763,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
               💾 النسخ الاحتياطي وتصدير الداتا
             </h2>
             <p className="text-xs text-main mb-4 leading-relaxed">
-              بسبب أن شاشة المعاينة المؤقتة تحذف البيانات، استخدم هذا القسم لنقل بياناتك بأمان.
+              فيه نسخة احتياطية أوتوماتيك كل أسبوع على السحابة (آخر 8 نسخ). وتقدر كمان تنزّل نسخة بنفسك من هنا.
             </p>
             <div className="flex gap-2 mb-3">
               <button
@@ -1326,6 +1339,108 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
             
             <div className="overflow-y-auto pr-1 flex-1 space-y-3 block">
               {getDailyDetailsList()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Advanced settings */}
+      <div className="card-bg rounded-lg p-5 border-t-2 border-slate-500 relative animate-fadeIn">
+        <h2 className="text-lg font-bold text-main mb-4 flex items-center">⚙️ إعدادات متقدمة</h2>
+
+        <div className="input-bg rounded-lg border border-theme p-4 mb-4">
+          <div className="font-black text-amber-400 mb-1">🔒 قفل الشهر ({currentMonthKey})</div>
+          <p className="text-[11px] text-muted mb-3 leading-relaxed">
+            قفل الشهر بيعلّم الشهر إنه مقفول وبس. مش بيمسح أي مدفوعات أو حضور أو اشتراكات، والتقارير الشهرية هتفضل شايفة أرقامه.
+          </p>
+          {lockedMonths.includes(currentMonthKey) ? (
+            <div className="text-amber-400 text-sm font-black">الشهر ده مقفول بالفعل 🔒</div>
+          ) : (
+            <button
+              onClick={() => {
+                setLockConfirmText('');
+                setShowLockModal(true);
+              }}
+              className="w-full bg-amber-500/20 text-amber-400 border border-amber-500/50 py-2 rounded-lg font-bold hover:bg-amber-500 hover:text-white transition-all"
+            >
+              قفل الشهر 🔒
+            </button>
+          )}
+          {lockedMonths.length > 0 && (
+            <div className="text-[11px] text-muted mt-3">
+              الشهور المقفولة: {[...lockedMonths].sort().reverse().join('، ')}
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={() => setShowSignOutConfirm(true)}
+          className="w-full bg-danger/10 text-danger border border-danger/40 py-3 rounded-lg font-bold hover:bg-danger hover:text-white transition-all"
+        >
+          تسجيل خروج 🚪
+        </button>
+      </div>
+
+      {showLockModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="card-bg rounded-lg p-6 w-full max-w-sm text-center border border-theme">
+            <h3 className="text-xl font-bold text-amber-400 mb-2">قفل شهر {currentMonthKey}</h3>
+            <p className="text-main text-sm mb-4">
+              مفيش أي بيانات هتتمسح. اكتب كلمة <b className="text-amber-400">تأكيد</b> علشان تقفل الشهر.
+            </p>
+            <input
+              type="text"
+              value={lockConfirmText}
+              onChange={(e) => setLockConfirmText(e.target.value)}
+              placeholder="تأكيد"
+              className="w-full input-bg rounded-lg px-3 py-2 text-sm border border-theme mb-4 text-center"
+            />
+            <div className="flex gap-3">
+              <button
+                disabled={lockConfirmText.trim() !== 'تأكيد'}
+                onClick={async () => {
+                  await onLockMonth(currentMonthKey);
+                  setShowLockModal(false);
+                  setLockConfirmText('');
+                }}
+                className="w-1/2 bg-amber-500 text-white font-bold rounded-md px-4 py-2 disabled:opacity-40"
+              >
+                قفل
+              </button>
+              <button
+                onClick={() => setShowLockModal(false)}
+                className="w-1/2 input-bg font-bold rounded-md px-4 py-2"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSignOutConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="card-bg rounded-lg p-6 w-full max-w-sm text-center border border-theme">
+            <h3 className="text-xl font-bold text-danger mb-2">تسجيل خروج</h3>
+            <p className="text-main text-sm mb-6">
+              بياناتك هتفضل محفوظة على الجهاز. هتحتاج إنترنت علشان تدخل تاني.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={async () => {
+                  setShowSignOutConfirm(false);
+                  await onSignOut();
+                }}
+                className="w-1/2 bg-danger text-white font-bold rounded-md px-4 py-2"
+              >
+                خروج
+              </button>
+              <button
+                onClick={() => setShowSignOutConfirm(false)}
+                className="w-1/2 input-bg font-bold rounded-md px-4 py-2"
+              >
+                إلغاء
+              </button>
             </div>
           </div>
         </div>
