@@ -1,9 +1,15 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabase';
 
+/**
+ * The coach logs in with a single code.
+ * Behind the scenes this is a normal Supabase Auth sign-in for one fixed account:
+ * the code is that account's password. The code itself is NOT stored in the source.
+ */
+const COACH_EMAIL = 'coach@gym-solo.app';
+
 export const LoginScreen: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -18,13 +24,13 @@ export const LoginScreen: React.FC = () => {
 
     setLoading(true);
     const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
+      email: COACH_EMAIL,
+      password: code.trim(),
     });
     setLoading(false);
 
     if (signInError) {
-      setError('الإيميل أو الباسورد غلط، جرّب تاني.');
+      setError('الكود غلط، جرّب تاني.');
     }
   };
 
@@ -32,34 +38,22 @@ export const LoginScreen: React.FC = () => {
     <div className="min-h-screen flex items-center justify-center px-4" dir="rtl">
       <div className="card-bg rounded-2xl p-6 w-full max-w-sm border border-theme">
         <h1 className="text-2xl font-black text-primary glow-text text-center mb-1">Gym Solo 🏋️‍♂️</h1>
-        <p className="text-muted text-sm text-center mb-6 font-bold">تسجيل دخول المدرب</p>
+        <p className="text-muted text-sm text-center mb-6 font-bold">اكتب كود الدخول</p>
 
         <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="text-xs text-muted font-bold block mb-1">الإيميل</label>
-            <input
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full input-bg rounded-lg px-3 py-3 text-sm border border-theme"
-              style={{ direction: 'ltr' }}
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted font-bold block mb-1">الباسورد</label>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full input-bg rounded-lg px-3 py-3 text-sm border border-theme"
-              style={{ direction: 'ltr' }}
-            />
-          </div>
+          {/* Hidden username so the phone's password manager can remember the code */}
+          <input type="text" name="username" autoComplete="username" value={COACH_EMAIL} readOnly hidden />
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="الكود"
+            required
+            autoFocus
+            className="w-full input-bg rounded-lg px-3 py-3 text-base border border-theme text-center tracking-widest"
+            style={{ direction: 'ltr' }}
+          />
 
           {error && (
             <div className="text-danger text-xs font-bold bg-danger/10 border border-danger/30 rounded-lg px-3 py-2 text-center">
