@@ -5,6 +5,7 @@ import { ActiveSection } from './components/ActiveSection';
 import { GroupsSection } from './components/GroupsSection';
 import { ProfileSection } from './components/ProfileSection';
 import { ForecastsSection } from './components/ForecastsSection';
+import { DuplicateNamesAlert } from './components/DuplicateNamesAlert';
 import {
   db,
   runMigration,
@@ -13,7 +14,6 @@ import {
   supabase,
   registerSyncStatusCallback,
   syncPlayerToCloud,
-  deletePlayerFromCloud,
   fetchInitialDataFromSupabase,
   syncAllToCloud,
   syncExpectedAttendeeToCloud,
@@ -22,7 +22,10 @@ import {
   syncPersonalWalletToCloud,
   deletePersonalWalletFromCloud,
   fetchInitialPersonalWalletFromSupabase,
+  runWeeklyBackupIfDue,
 } from './supabase';
+
+const MONTH_LOCKS_ID = 'sys_month_locks';
 import type { Player, HistoryEntry, ExpectedAttendee, PersonalWalletEntry } from './types';
 
 interface SidebarWidgetProps {
@@ -238,8 +241,6 @@ export const App: React.FC = () => {
   // Delete Confirmation state
   const [playerToDeleteId, setPlayerToDeleteId] = useState<string | null>(null);
 
-  // General Reset Month Confirmation state
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   // General Backup/Import text modals
   const [showBackupModal, setShowBackupModal] = useState(false);
@@ -264,35 +265,8 @@ export const App: React.FC = () => {
   useEffect(() => {
     const runDailyCleanup = async () => {
       const todayStr = getTodayDate();
-      const allPlayers = await db.players.toArray();
-
-      // Deduplicate active players
-      const uniquePlayersMap = new Map<string, Player>();
-      const idsToDelete: string[] = [];
-      allPlayers.forEach(p => {
-        if (p.isSystem) return;
-        const key = p.name.trim().toLowerCase();
-        const existing = uniquePlayersMap.get(key);
-        if (existing) {
-          if ((p.last_updated || 0) > (existing.last_updated || 0)) {
-            uniquePlayersMap.set(key, p);
-            idsToDelete.push(existing.id);
-          } else {
-            idsToDelete.push(p.id);
-          }
-        } else {
-          uniquePlayersMap.set(key, p);
-        }
-      });
-
-      if (idsToDelete.length > 0) {
-        console.log(`Deduplication activeTab Cleanup: Deleting ${idsToDelete.length} duplicate records.`);
-        for (const id of idsToDelete) {
-          await db.players.delete(id);
-          await deletePlayerFromCloud(id);
-        }
-      }
-
+      // NOTE: automatic deduplication was removed. Duplicate names are only
+      // reported in the roster tab; the coach decides what to delete.
       const cleanPlayers = await db.players.toArray();
       let playersUpdated = false;
       const cleanedPlayers = cleanPlayers.map(p => {
@@ -339,41 +313,15 @@ export const App: React.FC = () => {
   useEffect(() => {
     const initializeData = async () => {
       // Step A: Run local data migration service
-      const localData = await runMigration();
-      const allPlayers = await db.players.toArray();
-      
+      await runMigration();
+
       // Load local wallet entries on startup
       const localWallet = await db.personalWallet.toArray();
       setWalletEntries(localWallet);
-      
-      // Startup Database Deduplication
-      const uniquePlayersMap = new Map<string, Player>();
-      const idsToDelete: string[] = [];
-      allPlayers.forEach(p => {
-        if (p.isSystem) return;
-        const key = p.name.trim().toLowerCase();
-        const existing = uniquePlayersMap.get(key);
-        if (existing) {
-          if ((p.last_updated || 0) > (existing.last_updated || 0)) {
-            uniquePlayersMap.set(key, p);
-            idsToDelete.push(existing.id);
-          } else {
-            idsToDelete.push(p.id);
-          }
-        } else {
-          uniquePlayersMap.set(key, p);
-        }
-      });
 
-      if (idsToDelete.length > 0) {
-        console.log(`Deduplication Cleanup: Deleting ${idsToDelete.length} duplicate player records...`);
-        for (const id of idsToDelete) {
-          await db.players.delete(id);
-          await deletePlayerFromCloud(id);
-        }
-      }
-
-      // Re-fetch the clean deduplicated array
+      // NOTE: startup automatic deduplication was removed (it deleted players
+      // with the same name from this device and the cloud). Duplicates are now
+      // only shown as a warning in the roster tab.
       const cleanPlayers = await db.players.toArray();
       setPlayers(cleanPlayers);
 
@@ -492,6 +440,9 @@ export const App: React.FC = () => {
           if (syncedWallet.length > 0) {
             setWalletEntries(syncedWallet);
           }
+
+          // Weekly automatic backup (read-only snapshot to private Storage bucket)
+          runWeeklyBackupIfDue();
         }, 1000);
       }
     };
@@ -661,6 +612,11 @@ export const App: React.FC = () => {
     }
     setPlayerToDeleteId(null);
     triggerToast("تم أرشفة اللاعب وإخفاؤه من القائمة بنجاح", true);
+  };
+
+  // Sign out (local Dexie data stays on the device)
+  const handleSignOut = async () => {
+    await supabase.auth.signOut({ scope: 'local' });
   };
 
   // Personal Wallet Handlers
@@ -1253,72 +1209,31 @@ export const App: React.FC = () => {
     );
   };
 
-  // Reset Current Month Profit and attendance logs
-  const handleResetMonth = async () => {
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-
-    const allPlayers = await db.players.toArray();
-    const updatedList: Player[] = [];
-
-    for (const p of allPlayers) {
-      let changed = false;
-      let history = p.history ? [...p.history] : [];
-      let attendance = p.attendance ? [...p.attendance] : [];
-      let subType = p.subType;
-      let startDate = p.startDate;
-      let paid = p.paid;
-      let cost = p.cost;
-
-      if (history.length > 0) {
-        const origLength = history.length;
-        history = history.filter(h => {
-          const hDate = new Date(h.date);
-          return !(hDate.getMonth() === currentMonth && hDate.getFullYear() === currentYear);
-        });
-        if (history.length !== origLength) changed = true;
-      }
-
-      if (!p.isSystem) {
-        if (attendance.length > 0) {
-          const origLength = attendance.length;
-          attendance = attendance.filter(dStr => {
-            const [y, m] = dStr.split('-');
-            return !(parseInt(y) === currentYear && parseInt(m) - 1 === currentMonth);
-          });
-          if (attendance.length !== origLength) changed = true;
-        }
-
-        if (startDate) {
-          const sDate = new Date(startDate);
-          if (sDate.getMonth() === currentMonth && sDate.getFullYear() === currentYear) {
-            subType = '';
-            startDate = '';
-            paid = 0;
-            cost = 0;
-            changed = true;
-          }
-        }
-      }
-
-      const updatedPlayer: Player = {
-        ...p,
-        history,
-        attendance,
-        subType,
-        startDate,
-        paid,
-        cost,
-      };
-
-      if (changed) {
-        await syncPlayerToCloud(updatedPlayer);
-      }
-      updatedList.push(updatedPlayer);
+  // Lock (close) a month. This ONLY marks the month as closed in a system record.
+  // It never deletes or changes history, attendance, subscriptions or money,
+  // so every monthly report keeps showing the month's numbers.
+  const handleLockMonth = async (monthKey: string) => {
+    let sys = await db.players.get(MONTH_LOCKS_ID);
+    if (!sys) {
+      sys = { id: MONTH_LOCKS_ID, isSystem: true, name: 'الشهور المقفولة', history: [] };
     }
-
+    const history = sys.history ? [...sys.history] : [];
+    if (history.some(h => h.desc === monthKey)) {
+      triggerToast('الشهر ده مقفول بالفعل 🔒');
+      return;
+    }
+    history.push({
+      desc: monthKey,
+      subType: 'month_lock',
+      cost: 0,
+      paid: 0,
+      date: getTodayDate(),
+      timestamp: Date.now(),
+    });
+    await syncPlayerToCloud({ ...sys, history });
+    const updatedList = await db.players.toArray();
     setPlayers(updatedList);
-    triggerToast("تم تصفير أرباح وحضور الشهر الحالي بالكامل بنجاح 🗑️", true);
+    triggerToast(`تم قفل شهر ${monthKey} 🔒 (كل الأرقام والسجلات محفوظة)`);
   };
 
   // Deep backup database recover scanner
@@ -1745,6 +1660,22 @@ export const App: React.FC = () => {
 
   const allGroups = [...new Set([...defaultGroups, ...currentGroups, ...configuredGroups])];
 
+  // Closed months (marker only — no data is removed)
+  const currentMonthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const lockedMonths = (players.find(p => p.id === MONTH_LOCKS_ID)?.history || []).map(h => h.desc);
+
+  // Duplicate names among active players (warning only — never auto-deleted)
+  const duplicateGroups = (() => {
+    const map = new Map<string, Player[]>();
+    players.forEach(p => {
+      if (p.isSystem || p.isDeleted || !p.name) return;
+      const key = p.name.trim().toLowerCase();
+      if (!key) return;
+      map.set(key, [...(map.get(key) || []), p]);
+    });
+    return [...map.values()].filter(list => list.length > 1);
+  })();
+
   return (
     <div className="max-w-md md:max-w-5xl lg:max-w-6xl xl:max-w-7xl mx-auto min-h-screen relative pb-28 md:pb-20 px-2 sm:px-4">
       {/* 1. Header controls (modes) */}
@@ -1825,13 +1756,11 @@ export const App: React.FC = () => {
             <h1 className="text-xl font-black mb-2 glow-text tracking-wider text-primary">[ SYSTEM ]</h1>
             <p className="text-muted text-sm mb-1 flex items-center justify-center gap-2 font-bold">
               <span>أرباح شهر ({currentMonthLabel})</span>
-              <button
-                onClick={() => setShowResetConfirm(true)}
-                className="text-danger bg-danger/10 hover:bg-danger hover:text-white border border-danger/20 rounded px-2 py-0.5 text-[10px] transition-all font-black"
-                title="مسح أرباح وحضور الشهر الحالي بالكامل"
-              >
-                تصفير 🗑️
-              </button>
+              {lockedMonths.includes(currentMonthKey) && (
+                <span className="text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-0.5 text-[10px] font-black">
+                  مقفول 🔒
+                </span>
+              )}
             </p>
             <div className="text-3xl font-black tracking-tight text-primary-light glow-text">
               {monthBenefit.netProfit} <span className="text-lg font-normal">ج.م</span>
@@ -1923,6 +1852,13 @@ export const App: React.FC = () => {
 
           {/* 5. Sub-sections content rendering */}
           <div className="px-4">
+            {activeTab === 'roster' && duplicateGroups.length > 0 && (
+              <DuplicateNamesAlert
+                groups={duplicateGroups}
+                onDelete={setPlayerToDeleteId}
+              />
+            )}
+
             {activeTab === 'roster' && (
               <RosterSection
                 players={players}
@@ -1991,6 +1927,10 @@ export const App: React.FC = () => {
                 onSaveWalletEntry={handleSaveWalletEntry}
                 onDeleteWalletEntry={handleDeleteWalletEntry}
                 onDeletePlayerTransaction={handleDeletePlayerTransaction}
+                lockedMonths={lockedMonths}
+                currentMonthKey={currentMonthKey}
+                onLockMonth={handleLockMonth}
+                onSignOut={handleSignOut}
               />
             )}
 
@@ -2166,35 +2106,6 @@ export const App: React.FC = () => {
               </button>
               <button
                 onClick={() => setPlayerToDeleteId(null)}
-                className="w-1/2 input-bg font-bold rounded-md px-4 py-2"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* C. General Reset Month Confirmation Modal */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-6 w-full max-w-sm text-center border border-theme">
-            <h3 className="text-xl font-bold text-danger mb-2">تأكيد تصفير الشهر!</h3>
-            <p className="text-main mb-6">
-              هل أنت متأكد من مسح جميع إيرادات وحضور الشهر الحالي لجميع اللاعبين؟ (لا يمكن التراجع عن هذا الإجراء)
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  handleResetMonth();
-                  setShowResetConfirm(false);
-                }}
-                className="w-1/2 bg-danger text-danger border border-danger font-bold rounded-md px-4 py-2"
-              >
-                تأكيد
-              </button>
-              <button
-                onClick={() => setShowResetConfirm(false)}
                 className="w-1/2 input-bg font-bold rounded-md px-4 py-2"
               >
                 إلغاء
