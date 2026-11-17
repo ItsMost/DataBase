@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { Player } from '../types';
+import { getSettings, analyzePlayer } from '../lib/subscription';
 
 interface RosterSectionProps {
   players: Player[];
@@ -13,6 +14,7 @@ interface RosterSectionProps {
   onOpenPayment: (playerId: string) => void;
   onOpenHistory: (playerId: string) => void;
   checkExpiration: (player: Player) => { isExpired: boolean; days: number; endDateStr: string };
+  onPayExtras: (playerId: string) => void;
   allGroups: string[];
 }
 
@@ -28,6 +30,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
   onOpenPayment,
   onOpenHistory,
   checkExpiration,
+  onPayExtras,
   allGroups,
 }) => {
   // Get today's local year and month in YYYY-MM format
@@ -145,6 +148,8 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
     }
     return `https://wa.me/${formattedPhone}`;
   };
+
+  const settings = getSettings(players);
 
   // Filtering players
   const filteredPlayers = players.filter(p => {
@@ -373,6 +378,38 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
                     <div className={`text-xs mt-2 font-bold ${statusColor} mb-2`}>
                       {statusDot}
                     </div>
+
+                    {(() => {
+                      const a = analyzePlayer(player, settings);
+                      const st = a.status;
+                      const b = a.balance;
+                      return (
+                        <>
+                          {st.totalSessions > 1 && (
+                            <div className={`text-xs font-bold mb-2 ${st.extraSessions > 0 ? 'text-amber-400' : 'text-muted'}`}>
+                              {st.extraSessions > 0 && st.usedSessions < st.totalSessions
+                                ? `حضر ${st.usedSessions} من ${st.totalSessions} + ${st.extraSessions} زيادة`
+                                : `حضر ${st.attendedInSub} من ${st.totalSessions}`}
+                              <span className="font-normal mr-1">({st.endMode === 'month' ? 'بتخلص بالشهر' : 'بتخلص بالحصص'})</span>
+                            </div>
+                          )}
+                          {b.extraCount > 0 && (
+                            <div className="mb-2 flex justify-between items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+                              <div className="text-[11px] font-bold text-amber-400 leading-relaxed">
+                                <div>حضر {b.extraCount} حصص زيادة</div>
+                                <div>دفعت للجيم بداله: {b.gymAdvanced} ج</div>
+                              </div>
+                              <button
+                                onClick={() => onPayExtras(player.id)}
+                                className="bg-amber-500 text-white px-3 py-1.5 rounded text-xs font-bold whitespace-nowrap active:scale-95"
+                              >
+                                دفع 💰
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
 
                     <div className="grid grid-cols-4 gap-1">
                       <button

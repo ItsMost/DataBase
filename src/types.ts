@@ -5,6 +5,28 @@ export interface HistoryEntry {
   date: string;
   timestamp: number;
   subType: string;
+  // --- Phase 2 (all optional; old entries keep working) ---
+  endMode?: EndMode; // How a package ends. Missing = 'sessions'.
+  place?: string; // Where the coach trains this player (default "الجيم").
+  // Renewal that started at the first extra session: those dates were already
+  // charged to the gym, so their gym money is stored here and deducted from `cost`.
+  absorbedExtras?: { date: string; gym: number }[];
+  // Package sessions are counted from this date (first extra session on a full renewal).
+  // `date` stays the day the money was paid, so the payment lands in the right month.
+  coverFrom?: string;
+  // "حصص زيادة" payment: the extra-session dates this payment settles.
+  settledExtras?: string[];
+}
+
+export type EndMode = 'sessions' | 'month';
+
+export interface AppSettings {
+  // Gym share per session, with the date each rate starts (keeps history exact).
+  gymRates: { from: string; rate: number }[];
+  discountThreshold: number;
+  discountTiers: { sessions: number; cost: number }[];
+  // Attendances before this date keep the old calculation (history unchanged).
+  v2From?: string;
 }
 
 export interface Player {
@@ -29,6 +51,8 @@ export interface Player {
   isSystem?: boolean; // True for system configurations like general expenses
   isDeleted?: boolean; // True if the player is soft-deleted/archived
   last_updated?: number;
+  endMode?: EndMode; // End mode of the current subscription
+  settings?: AppSettings; // Only on the 'sys_settings' system record
 }
 
 export interface SyncAction {
@@ -49,6 +73,9 @@ export interface ExpectedAttendee {
   time?: string; // Expected arrival time (e.g. "17:00")
   playerId?: string; // Link to existing player if chosen from database
   last_updated?: number;
+  cost?: number; // Gym/place money typed by the coach
+  endMode?: EndMode;
+  place?: string;
   isDeleted?: boolean; // True if soft-deleted/registered/archived
 }
 

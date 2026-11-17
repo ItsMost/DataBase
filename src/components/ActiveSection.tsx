@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { Player, HistoryEntry, ExpectedAttendee } from '../types';
+import type { Player, ExpectedAttendee, EndMode } from '../types';
+import {
+  getSettings,
+  analyzePlayer,
+  suggestGymCost,
+  isPackageType,
+  formatDate,
+  SINGLE_SESSION,
+  ATTEND_ONLY_TYPES,
+  DEFAULT_PLACE,
+} from '../lib/subscription';
+import { EndModePicker, GymCostField, PlaceField, usePlaceSuggestions } from './AccountingFields';
 
 interface ActiveSectionProps {
   players: Player[];
@@ -7,9 +18,20 @@ interface ActiveSectionProps {
   setSelectedPlayerId: (id: string) => void;
   onSaveSubscription: (
     playerId: string,
-    subData: { subType: string; startDate: string; paid: number; cost: number },
+    subData: {
+      subType: string;
+      startDate: string;
+      paid: number;
+      cost: number;
+      endMode?: EndMode;
+      place?: string;
+      absorbedExtras?: { date: string; gym: number }[];
+    },
     isEdit?: boolean
   ) => Promise<void>;
+  onPayExtras: (playerId: string, amount: number, extraDates: string[], place?: string) => Promise<void>;
+  payRequestPlayerId?: string | null; // open the payment choices for this player (from the roster card)
+  onPayRequestHandled?: () => void;
   onCancelSubscription: (playerId: string) => Promise<void>;
   checkExpiration: (player: Player) => { isExpired: boolean; days: number; endDateStr: string };
   onAddAttendance: (playerId: string, dateStr: string) => Promise<void>;
@@ -31,6 +53,9 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   selectedPlayerId,
   setSelectedPlayerId,
   onSaveSubscription,
+  onPayExtras,
+  payRequestPlayerId,
+  onPayRequestHandled,
   onCancelSubscription,
   checkExpiration,
   onAddAttendance,
@@ -50,8 +75,30 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   const [subType, setSubType] = useState('حصة واحدة');
   const [startDate, setStartDate] = useState(getTodayDate());
   const [paid, setPaid] = useState('');
-  const [cost, setCost] = useState(60);
+  const settings = getSettings(players);
+  const analysisOf = (p: Player) => analyzePlayer(p, settings);
+  const placeSuggestions = usePlaceSuggestions(players, expectedAttendees);
+
+  const [cost, setCost] = useState(() => suggestGymCost(settings, 'حصة واحدة', 0));
+  const [costTouched, setCostTouched] = useState(false); // coach typed the gym money himself
+  const [endMode, setEndMode] = useState<EndMode>('sessions');
+  const [place, setPlace] = useState(DEFAULT_PLACE);
+  // Full renewal that starts at the first extra session (their gym money is deducted)
+  const [absorbed, setAbsorbed] = useState<{ date: string; gym: number }[]>([]);
+  const absorbedGym = absorbed.reduce((sum, x) => sum + x.gym, 0);
   const [editingMode, setEditingMode] = useState<string | null>(null); // PlayerId if editing current active sub
+
+  // Payment choice dialog (full renewal / pay extras only)
+  const [payDialogPlayerId, setPayDialogPlayerId] = useState<string | null>(null);
+  const [extrasAmount, setExtrasAmount] = useState('');
+
+  useEffect(() => {
+    if (payRequestPlayerId) {
+      setExtrasAmount('');
+      setPayDialogPlayerId(payRequestPlayerId);
+      onPayRequestHandled?.();
+    }
+  }, [payRequestPlayerId]);
 
   // Custom attendance date state per player
   const [attDates, setAttDates] = useState<{ [playerId: string]: string }>({});
@@ -69,6 +116,10 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   const [expPaid, setExpPaid] = useState('');
   const [expSubType, setExpSubType] = useState('حصة واحدة');
   const [expTime, setExpTime] = useState('');
+  const [expCost, setExpCost] = useState(() => suggestGymCost(settings, 'حصة واحدة', 0));
+  const [expCostTouched, setExpCostTouched] = useState(false);
+  const [expEndMode, setExpEndMode] = useState<EndMode>('sessions');
+  const [expPlace, setExpPlace] = useState(DEFAULT_PLACE);
   const [showExpDropdown, setShowExpDropdown] = useState(false);
   const expDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -78,6 +129,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   const [editingExpGroup, setEditingExpGroup] = useState('');
   const [editingExpPaid, setEditingExpPaid] = useState('');
   const [editingExpSubType, setEditingExpSubType] = useState('');
+  const [editingExpCost, setEditingExpCost] = useState('');
 
   // Handle clicking outside the searchable dropdowns to close them
   useEffect(() => {
@@ -105,40 +157,34 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     }
   }, [selectedPlayerId, players]);
 
-  // Auto-calculate subscription cost based on rules
+  // Suggested gym/place money (rules live in the settings). The coach can override it.
+  const gymRateNow = suggestGymCost(settings, SINGLE_SESSION, 0);
   useEffect(() => {
-    const rawPaid = parseFloat(paid) || 0;
-    if (subType === 'حصة واحدة') {
-      setCost(60);
-    } else {
-      let sessions = 0;
-      if (subType === '8 حصص') sessions = 8;
-      else if (subType === '10 حصص') sessions = 10;
-      else if (subType === '12 حصة') sessions = 12;
-      else if (subType === '16 حصة') sessions = 16;
-      else if (subType === '20 حصة') sessions = 20;
+    if (costTouched) return;
+    const suggested = suggestGymCost(settings, subType, parseFloat(paid) || 0, startDate || getTodayDate());
+    setCost(Math.max(0, suggested - absorbedGym));
+  }, [subType, paid, absorbedGym, costTouched, gymRateNow, JSON.stringify(settings.discountTiers), settings.discountThreshold]);
 
-      if (rawPaid >= 1500 && subType !== '10 حصص') {
-        if (sessions === 8) setCost(800);
-        else if (sessions === 12) setCost(900);
-        else if (sessions === 16) setCost(1000);
-        else if (sessions === 20) setCost(1100);
-      } else {
-        setCost(sessions * 60);
-      }
-    }
-  }, [subType, paid]);
+  useEffect(() => {
+    if (expCostTouched) return;
+    setExpCost(suggestGymCost(settings, expSubType, parseFloat(expPaid) || 0));
+  }, [expSubType, expPaid, expCostTouched, gymRateNow, JSON.stringify(settings.discountTiers), settings.discountThreshold]);
 
   // Pre-fill if a player is selected via Roster "+ دفع" or if we are editing
   useEffect(() => {
     if (selectedPlayerId) {
       const player = players.find(p => p.id === selectedPlayerId);
       if (player && player.subType && editingMode === player.id) {
+        const current = analysisOf(player).currentSub;
         setSubType(player.subType);
         setStartDate(player.startDate || getTodayDate());
         setPaid(player.paid ? String(player.paid) : '');
-        setCost(player.cost ? player.cost : 60);
-      } else {
+        setCost(player.cost ? player.cost : 0);
+        setCostTouched(true); // keep the saved number while editing
+        setEndMode(player.endMode || current?.endMode || 'sessions');
+        setPlace(current?.place || DEFAULT_PLACE);
+        setAbsorbed([]);
+      } else if (absorbed.length === 0) {
         // Just standard "+ دفع" from roster card
         setStartDate(getTodayDate());
         setPaid('');
@@ -159,6 +205,9 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
       startDate: startDate || getTodayDate(),
       paid: parseFloat(paid) || 0,
       cost: cost,
+      endMode: isPackageType(subType) ? endMode : undefined,
+      place,
+      absorbedExtras: editingMode ? undefined : absorbed,
     }, !!editingMode);
 
     // Reset Form
@@ -166,6 +215,10 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     setPaid('');
     setSubType('حصة واحدة');
     setEditingMode(null);
+    setCostTouched(false);
+    setEndMode('sessions');
+    setPlace(DEFAULT_PLACE);
+    setAbsorbed([]);
   };
 
   const handleEditSubscription = (player: Player) => {
@@ -175,11 +228,42 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   };
 
   const handleRenewSubscription = (player: Player) => {
+    // If the player has unpaid extra sessions, ask how he pays first
+    if (analysisOf(player).balance.extraCount > 0) {
+      setExtrasAmount('');
+      setPayDialogPlayerId(player.id);
+      return;
+    }
+    startNormalRenewal(player);
+  };
+
+  const startNormalRenewal = (player: Player) => {
     setSelectedPlayerId(player.id);
     setEditingMode(null);
     setStartDate(getTodayDate());
     setPaid('');
     setSubType(player.subType || '8 حصص');
+    setEndMode(player.endMode || 'sessions');
+    setPlace(analysisOf(player).currentSub?.place || DEFAULT_PLACE);
+    setCostTouched(false);
+    setAbsorbed([]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // (1) Full renewal: the extra sessions become the first sessions of the new package.
+  const startFullRenewalWithExtras = (player: Player) => {
+    const a = analysisOf(player);
+    const extras = a.balance.extraDates.map(d => ({ date: d, gym: a.attendance.get(d)?.charge ?? 0 }));
+    setSelectedPlayerId(player.id);
+    setEditingMode(null);
+    setStartDate(a.balance.oldestDate || getTodayDate());
+    setPaid('');
+    setSubType(isPackageType(player.subType) ? player.subType! : '8 حصص');
+    setEndMode(player.endMode || 'sessions');
+    setPlace(a.currentSub?.place || DEFAULT_PLACE);
+    setCostTouched(false);
+    setAbsorbed(extras);
+    setPayDialogPlayerId(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -187,25 +271,16 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     setAttDates(prev => ({ ...prev, [playerId]: dateStr }));
   };
 
-  // Helper to calculate attendance statistics
+  // Attendance statistics from the shared engine
   const getAttendanceStats = (player: Player) => {
-    const maxSessions =
-      player.subType === '8 حصص' ? 8 :
-      player.subType === '10 حصص' ? 10 :
-      player.subType === '12 حصة' ? 12 :
-      player.subType === '16 حصة' ? 16 :
-      player.subType === '20 حصة' ? 20 :
-      player.subType === 'حصة واحدة' ? 1 : 0;
-
-    let activeAttendances = 0;
-    if (player.attendance && player.startDate) {
-      activeAttendances = player.attendance.filter(d => d >= player.startDate!).length;
-    }
-
-    const percentage = maxSessions > 0 ? (activeAttendances / maxSessions) * 100 : 0;
+    const st = analysisOf(player).status;
+    const maxSessions = st.totalSessions;
+    const activeAttendances = st.attendedInSub;
+    const percentage = maxSessions > 0 ? (st.usedSessions / maxSessions) * 100 : 0;
     return {
       activeAttendances,
       maxSessions,
+      extraSessions: st.extraSessions,
       percentage: Math.min(percentage, 100),
     };
   };
@@ -241,27 +316,18 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   });
 
   const getTodaySessionNumberText = (player: Player) => {
-    if (!player.subType || player.subType === 'حصة واحدة') {
-      return 'حصة فردية اليوم';
-    }
-    const today = getTodayDate();
-    if (!player.attendance || !player.startDate) {
-      return 'حصة رقم 1';
-    }
-    const activeAtts = player.attendance
-      .filter(d => d >= player.startDate!)
-      .sort((a, b) => a.localeCompare(b));
-    const sessionIndex = activeAtts.indexOf(today);
-    const sessionNum = sessionIndex >= 0 ? sessionIndex + 1 : activeAtts.length;
-    
-    const maxSessions = player.subType === '8 حصص' ? 8 :
-                        player.subType === '10 حصص' ? 10 :
-                        player.subType === '12 حصة' ? 12 :
-                        player.subType === '16 حصة' ? 16 :
-                        player.subType === '20 حصة' ? 20 : 0;
-    
-    return `الحصة رقم ${sessionNum} من ${maxSessions}`;
+    const info = analysisOf(player).attendance.get(getTodayDate());
+    if (!info || info.kind === 'single') return 'حصة فردية اليوم';
+    if (info.kind === 'extra') return 'حصة زيادة ⚠️';
+    return `الحصة رقم ${info.sessionNumber} من ${analysisOf(player).status.totalSessions || '-'}`;
   };
+
+  // Outstanding money: gym money the coach advanced for extra sessions, oldest first
+  const playersWithExtras = players
+    .filter(p => !p.isSystem && !p.isDeleted && analysisOf(p).balance.extraCount > 0)
+    .sort((a, b) => (analysisOf(a).balance.oldestDate || '').localeCompare(analysisOf(b).balance.oldestDate || ''));
+  const outstandingGym = playersWithExtras.reduce((sum, p) => sum + analysisOf(p).balance.gymAdvanced, 0);
+  const payDialogPlayer = payDialogPlayerId ? players.find(p => p.id === payDialogPlayerId) : undefined;
 
   const filteredAttendedToday = players.filter(p => {
     if (!p || p.isSystem || p.isDeleted) return false;
@@ -366,6 +432,113 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
         </div>
       )}
 
+      {/* Outstanding money: gym paid by the coach for extra sessions */}
+      <div className="card-bg rounded-lg p-4 border border-amber-500/40 bg-amber-500/5">
+        <h3 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-1.5">💸 الفلوس اللي برّه</h3>
+        <div className="grid grid-cols-2 gap-2 text-center mb-3">
+          <div className="input-bg rounded-lg p-2 border border-theme">
+            <div className="text-[10px] text-muted">دفعتها للجيم ولسه مرجعتش</div>
+            <div className="text-amber-400 font-black text-lg">{outstandingGym} ج</div>
+          </div>
+          <div className="input-bg rounded-lg p-2 border border-theme">
+            <div className="text-[10px] text-muted">لاعيبة عليهم حصص زيادة</div>
+            <div className="text-amber-400 font-black text-lg">{playersWithExtras.length}</div>
+          </div>
+        </div>
+        {playersWithExtras.length === 0 ? (
+          <div className="text-[11px] text-muted text-center">مفيش حصص زيادة متأخرة ✅</div>
+        ) : (
+          <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+            {playersWithExtras.map(p => {
+              const b = analysisOf(p).balance;
+              return (
+                <div key={p.id} className="input-bg rounded p-2 flex justify-between items-center border border-amber-500/20 text-xs gap-2">
+                  <div className="text-right">
+                    <span className="font-bold text-main block">[#{p.number || '000'}] {p.name}</span>
+                    <span className="text-amber-400 text-[10px] font-bold">
+                      حضر {b.extraCount} حصص زيادة · من {formatDate(b.oldestDate || '')} · دفعت للجيم {b.gymAdvanced} ج
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setExtrasAmount('');
+                      setPayDialogPlayerId(p.id);
+                    }}
+                    className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-2 py-1.5 rounded font-bold whitespace-nowrap hover:bg-amber-500 hover:text-white transition-all"
+                  >
+                    دفع 💰
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {payDialogPlayer && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="card-bg rounded-lg p-5 w-full max-w-sm border border-theme text-right">
+            <h3 className="text-lg font-bold text-primary mb-1">دفع: {payDialogPlayer.name}</h3>
+            <p className="text-xs text-amber-400 font-bold mb-4">
+              حضر {analysisOf(payDialogPlayer).balance.extraCount} حصص زيادة · دفعت للجيم بداله {analysisOf(payDialogPlayer).balance.gymAdvanced} ج
+            </p>
+
+            <button
+              onClick={() => startFullRenewalWithExtras(payDialogPlayer)}
+              className="w-full btn-primary font-bold rounded-md px-4 py-3 mb-1"
+            >
+              ♻️ تجديد اشتراك كامل
+            </button>
+            <p className="text-[10px] text-muted mb-4 leading-relaxed">
+              الحصص الزيادة بتتحسب من الباقة الجديدة (البداية = أول حصة زيادة)، وفلوس الجيم بتاعتها بتتخصم من تكلفة الباقة.
+            </p>
+
+            <div className="border-t border-theme pt-3">
+              <label className="text-xs text-muted font-bold block mb-1">دفع الحصص الزيادة بس — المبلغ اللي دفعه (ج)</label>
+              <input
+                type="number"
+                value={extrasAmount}
+                onChange={(e) => setExtrasAmount(e.target.value)}
+                placeholder="اكتب المبلغ"
+                className="w-full input-bg rounded-md px-3 py-2 text-sm border border-theme mb-2"
+              />
+              <button
+                disabled={extrasAmount === '' || isNaN(parseFloat(extrasAmount))}
+                onClick={async () => {
+                  const b = analysisOf(payDialogPlayer).balance;
+                  await onPayExtras(payDialogPlayer.id, parseFloat(extrasAmount) || 0, b.extraDates, analysisOf(payDialogPlayer).currentSub?.place);
+                  setPayDialogPlayerId(null);
+                  setExtrasAmount('');
+                }}
+                className="w-full bg-amber-500 text-white font-bold rounded-md px-4 py-2 disabled:opacity-40"
+              >
+                💰 دفع الحصص الزيادة بس
+              </button>
+            </div>
+
+            <div className="flex gap-2 mt-3">
+              {payDialogPlayer.subType && (
+                <button
+                  onClick={() => {
+                    setPayDialogPlayerId(null);
+                    startNormalRenewal(payDialogPlayer);
+                  }}
+                  className="w-1/2 input-bg font-bold rounded-md px-3 py-2 text-xs border border-theme"
+                >
+                  تجديد من النهارده
+                </button>
+              )}
+              <button
+                onClick={() => setPayDialogPlayerId(null)}
+                className={`${payDialogPlayer.subType ? 'w-1/2' : 'w-full'} input-bg font-bold rounded-md px-3 py-2 text-xs border border-theme`}
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 2. Expected Today Panel */}
       <div className="card-bg rounded-lg p-5 border-t-2 border-primary relative">
         <h2 className="text-lg font-bold text-primary mb-3 flex items-center gap-1.5 glow-text pr-2">
@@ -409,12 +582,18 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
               subType: expSubType,
               date: getTodayDate(),
               time: expTime,
+              cost: ATTEND_ONLY_TYPES.includes(expSubType) ? undefined : expCost,
+              endMode: isPackageType(expSubType) ? expEndMode : undefined,
+              place: expPlace.trim() || DEFAULT_PLACE,
             });
             setExpName('');
             setSelectedExpPlayerId('');
             setExpPaid('');
             setExpGroup('');
             setExpTime('');
+            setExpCostTouched(false);
+            setExpEndMode('sessions');
+            setExpPlace(DEFAULT_PLACE);
           }}
           className="space-y-3 border-b border-theme/30 pb-4 mb-4"
         >
@@ -533,6 +712,26 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
             />
           </div>
 
+          {isPackageType(expSubType) && (
+            <EndModePicker value={expEndMode} onChange={setExpEndMode} />
+          )}
+
+          {!ATTEND_ONLY_TYPES.includes(expSubType) && (
+            <div className="grid grid-cols-2 gap-2">
+              <GymCostField
+                value={expCost}
+                onChange={(v) => {
+                  setExpCost(v);
+                  setExpCostTouched(true);
+                }}
+                onReset={() => setExpCostTouched(false)}
+                touched={expCostTouched}
+                compact
+              />
+              <PlaceField value={expPlace} onChange={setExpPlace} suggestions={placeSuggestions} listId="expPlaceList" compact />
+            </div>
+          )}
+
           <button
             type="submit"
             className="w-full btn-primary font-bold rounded-md text-xs py-3 shadow-md active:scale-95 transition-all"
@@ -621,6 +820,18 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                         </div>
                       </div>
 
+                      {!ATTEND_ONLY_TYPES.includes(editingExpSubType) && (
+                        <div className="text-xs">
+                          <label className="text-[9px] text-muted block mb-0.5">للجيم / المكان (ج)</label>
+                          <input
+                            type="number"
+                            value={editingExpCost}
+                            onChange={(e) => setEditingExpCost(e.target.value)}
+                            className="w-full input-bg rounded px-2 py-1 border border-theme text-xs text-right"
+                          />
+                        </div>
+                      )}
+
                       <div className="flex gap-2 pt-1 border-t border-theme/20">
                         <button
                           onClick={async () => {
@@ -630,6 +841,11 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                               sport: editingExpGroup,
                               paid: parseFloat(editingExpPaid) || 0,
                               subType: editingExpSubType,
+                              cost: ATTEND_ONLY_TYPES.includes(editingExpSubType)
+                                ? undefined
+                                : (editingExpCost === ''
+                                    ? suggestGymCost(settings, editingExpSubType, parseFloat(editingExpPaid) || 0)
+                                    : parseFloat(editingExpCost) || 0),
                             });
                             setEditingExpId(null);
                           }}
@@ -672,6 +888,14 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                           <span className="text-muted block text-[10px]">سيدفع</span>
                           <span className="text-success font-bold">{att.paid} ج</span>
                         </div>
+                        {!ATTEND_ONLY_TYPES.includes(att.subType) && (
+                          <div>
+                            <span className="text-muted block text-[10px]">للجيم</span>
+                            <span className="text-danger font-bold">
+                              {typeof att.cost === 'number' ? att.cost : suggestGymCost(settings, att.subType, att.paid || 0)} ج
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex gap-2 mt-1">
@@ -688,6 +912,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                             setEditingExpGroup(att.sport || '');
                             setEditingExpPaid(String(att.paid || 0));
                             setEditingExpSubType(att.subType || 'حصة واحدة');
+                            setEditingExpCost(typeof att.cost === 'number' ? String(att.cost) : '');
                           }}
                           className="w-1/3 bg-primary/20 text-primary-light text-[10px] font-bold py-1.5 rounded hover:bg-primary hover:text-white active:scale-95 transition-all border border-primary/30"
                         >
@@ -794,6 +1019,10 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
             <option value="20 حصة">20 حصة في الشهر</option>
           </select>
 
+          {isPackageType(subType) && (
+            <EndModePicker value={endMode} onChange={setEndMode} />
+          )}
+
           <input
             type="date"
             value={startDate}
@@ -801,22 +1030,46 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
             className="w-full input-bg rounded-md px-4 py-3"
           />
 
-          <div className="flex gap-3">
-            <input
-              type="number"
-              value={paid}
-              onChange={(e) => setPaid(e.target.value)}
-              placeholder="دفع كام؟"
-              className="w-1/2 input-bg rounded-md px-4 py-3"
-            />
-            <input
-              type="number"
+          {absorbed.length > 0 && (
+            <div className="text-[11px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2 leading-relaxed">
+              تجديد كامل: الباقة بتبدأ من أول حصة زيادة ({formatDate(absorbed[0].date)}) و{absorbed.length} حصص زيادة اتحسبوا منها.
+              اتخصم {absorbedGym} ج من فلوس الجيم لأنك دفعتهم قبل كده.
+              <button
+                type="button"
+                onClick={() => {
+                  setAbsorbed([]);
+                  setStartDate(getTodayDate());
+                }}
+                className="block mt-1 text-muted underline"
+              >
+                إلغاء الخصم والبدء من النهارده
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted font-bold block mb-1">دفع كام؟ (ج)</label>
+              <input
+                type="number"
+                value={paid}
+                onChange={(e) => setPaid(e.target.value)}
+                placeholder="المبلغ"
+                className="w-full input-bg rounded-md px-4 py-3"
+              />
+            </div>
+            <GymCostField
               value={cost}
-              onChange={(e) => setCost(parseFloat(e.target.value) || 0)}
-              placeholder="التكلفة"
-              className="w-1/2 input-bg rounded-md px-4 py-3 text-success font-bold"
+              onChange={(v) => {
+                setCost(v);
+                setCostTouched(true);
+              }}
+              onReset={() => setCostTouched(false)}
+              touched={costTouched}
             />
           </div>
+
+          <PlaceField value={place} onChange={setPlace} suggestions={placeSuggestions} listId="subPlaceList" />
 
           <button
             type="submit"
@@ -901,7 +1154,8 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
           <div className="space-y-4">
             {monthlySubscribers.map(player => {
               const expInfo = checkExpiration(player);
-              const { activeAttendances, maxSessions, percentage } = getAttendanceStats(player);
+              const { activeAttendances, maxSessions, extraSessions, percentage } = getAttendanceStats(player);
+              const balance = analysisOf(player).balance;
               const formattedStartDate = player.startDate
                 ? new Date(player.startDate).toLocaleDateString('en-GB')
                 : '-';
@@ -963,8 +1217,18 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                   {/* Attendance Log Tracker */}
                   <div className="mt-3 pt-3 border-t border-theme">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-1">
-                      <div className="text-xs text-muted">
-                        الحضور: <span className="text-primary font-bold">{activeAttendances}</span> من {maxSessions}
+                      <div className={`text-xs ${extraSessions > 0 ? 'text-amber-400 font-bold' : 'text-muted'}`}>
+                        حضر: <span className={extraSessions > 0 ? 'text-amber-400 font-black' : 'text-primary font-bold'}>
+                          {extraSessions > 0 && activeAttendances - extraSessions < maxSessions ? activeAttendances - extraSessions : activeAttendances}
+                        </span> من {maxSessions}
+                        {extraSessions > 0 && activeAttendances - extraSessions < maxSessions && (
+                          <span className="text-amber-400 font-black"> + {extraSessions} زيادة</span>
+                        )}
+                        {analysisOf(player).status.endMode && (
+                          <span className="text-muted font-normal mr-1">
+                            ({analysisOf(player).status.endMode === 'month' ? 'بتخلص بالشهر' : 'بتخلص بالحصص'})
+                          </span>
+                        )}
                       </div>
                       <div className="flex gap-1 items-center w-full sm:w-auto">
                         <input
@@ -998,6 +1262,17 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                       ></div>
                     </div>
                   </div>
+
+                  {balance.extraCount > 0 && (
+                    <ExtrasBalance
+                      count={balance.extraCount}
+                      gym={balance.gymAdvanced}
+                      onPay={() => {
+                        setExtrasAmount('');
+                        setPayDialogPlayerId(player.id);
+                      }}
+                    />
+                  )}
 
                   {/* Renew, Edit, Cancel Sub actions */}
                   <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-theme">
@@ -1119,3 +1394,18 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     </div>
   );
 };
+
+const ExtrasBalance: React.FC<{ count: number; gym: number; onPay: () => void }> = ({ count, gym, onPay }) => (
+  <div className="mt-3 flex justify-between items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+    <div className="text-[11px] font-bold text-amber-400 leading-relaxed">
+      <div>حضر {count} حصص زيادة</div>
+      <div>دفعت للجيم بداله: {gym} ج</div>
+    </div>
+    <button
+      onClick={onPay}
+      className="bg-amber-500 text-white px-3 py-1.5 rounded text-xs font-bold whitespace-nowrap active:scale-95"
+    >
+      دفع 💰
+    </button>
+  </div>
+);

@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Player, ExpectedAttendee } from '../types';
+import { getSettings, analyzePlayer, suggestGymCost, SINGLE_SESSION } from '../lib/subscription';
 
 interface ForecastsSectionProps {
   players: Player[];
@@ -12,28 +13,9 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
   expectedAttendees,
   getTodayDate,
 }) => {
-  // Helper for checking subscription expiration
-  const checkExpiration = (player: Player) => {
-    if (!player.startDate || !player.subType || player.subType === 'حصة واحدة') {
-      return { isExpired: true, days: 0, endDateStr: '-' };
-    }
-    const start = new Date(player.startDate);
-    const end = new Date(start);
-    end.setMonth(end.getMonth() + 1);
-
-    const today = new Date(getTodayDate());
-    const diffTime = end.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    const isExpired = diffDays < 0;
-    const endDateStr = end.toLocaleDateString('en-GB');
-
-    return {
-      isExpired,
-      days: Math.abs(diffDays),
-      endDateStr,
-      endDateObj: end,
-    };
-  };
+  // Same status function as every other tab (src/lib/subscription.ts)
+  const settings = getSettings(players);
+  const checkExpiration = (player: Player) => analyzePlayer(player, settings).status;
 
   // --- Historical data compiled to find daily averages ---
   const dailySessionRevenues: { [date: string]: number } = {};
@@ -50,27 +32,12 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
         }
       });
 
-      // Calculate gym cost additions from expired or walk-in attendees
+      // Gym cost of extra / walk-in attendances (same engine as the reports)
+      const analysis = analyzePlayer(p, settings);
       p.attendance?.forEach(attDate => {
-        let isMonthly = false;
-        let hasPaidDailyToday = false;
-        if (p.history) {
-          hasPaidDailyToday = p.history.some(h => h.date === attDate && h.subType === 'حصة واحدة');
-          const pastHistories = p.history
-            .filter(h => h.date <= attDate)
-            .sort((a, b) => b.date.localeCompare(a.date));
-          if (pastHistories.length > 0 && pastHistories[0].subType !== 'حصة واحدة') {
-            const start = new Date(pastHistories[0].date);
-            const end = new Date(start);
-            end.setMonth(end.getMonth() + 1);
-            const att = new Date(attDate);
-            if (att <= end) {
-              isMonthly = true;
-            }
-          }
-        }
-        if (!isMonthly && !hasPaidDailyToday) {
-          dailySessionCosts[attDate] = (dailySessionCosts[attDate] || 0) + 60;
+        const charge = analysis.attendance.get(attDate)?.charge ?? 0;
+        if (charge > 0) {
+          dailySessionCosts[attDate] = (dailySessionCosts[attDate] || 0) + charge;
         }
       });
     }
@@ -124,16 +91,10 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
 
   activeExpected.forEach(att => {
     expectedRevToday += att.paid || 0;
-    if (att.subType === 'حصة واحدة' || att.subType === 'حضور فقط (مشترك شهرياً)' || att.subType === 'حضور فقط') {
-      expectedCostToday += 60;
-    } else {
-      const monthlyCost =
-        att.subType === '8 حصص' ? 480 :
-        att.subType === '10 حصص' ? 600 :
-        att.subType === '12 حصة' ? 720 :
-        att.subType === '16 حصة' ? 960 : 1200;
-      expectedCostToday += monthlyCost;
-    }
+    // Gym money typed by the coach, otherwise the same suggestion as the payment form
+    expectedCostToday += typeof att.cost === 'number'
+      ? att.cost
+      : suggestGymCost(settings, att.subType || SINGLE_SESSION, att.paid || 0);
   });
 
   const todayRevForecast = actualRevToday + expectedRevToday;
