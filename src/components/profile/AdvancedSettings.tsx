@@ -4,9 +4,10 @@
 import React from 'react';
 import { SettingsPanel } from '../SettingsPanel';
 import type { ProfileSectionVM } from '../../hooks/useProfileSection';
+import { TrashBin } from './TrashBin';
 
 export const AdvancedSettings: React.FC<{ vm: ProfileSectionVM }> = ({ vm }) => {
-  const { onImportJSON, onDeepRecover, lockedMonths, currentMonthKey, onLockMonth, onSignOut, onSaveSettings, settings, showLockModal, setShowLockModal, lockConfirmText, setLockConfirmText, showSignOutConfirm, setShowSignOutConfirm } = vm;
+  const { players, onRestorePlayer, onImportJSON, onDeepRecover, lockedMonths, currentMonthKey, onLockMonth, onSignOut, onSaveSettings, settings, showLockModal, setShowLockModal, lockConfirmText, setLockConfirmText, showSignOutConfirm, setShowSignOutConfirm } = vm;
   return (
     <>
       {/* Advanced settings */}
@@ -39,6 +40,9 @@ export const AdvancedSettings: React.FC<{ vm: ProfileSectionVM }> = ({ vm }) => 
             </div>
           )}
         </div>
+
+        {/* Trash: deleted players can always be restored */}
+        <TrashBin players={players} onRestore={onRestorePlayer} />
 
         {/* Emergency tools (moved here from the backup section) */}
         <div className="input-bg rounded-lg border border-red-500/30 p-4 mb-4">

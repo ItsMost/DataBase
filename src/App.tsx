@@ -30,8 +30,8 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'roster' | 'active' | 'groups' | 'profile' | 'forecasts'>('roster');
   
   // Data (Dexie + cloud + realtime) and sync status
-  const { players, setPlayers, expectedAttendees, setExpectedAttendees, walletEntries, setWalletEntries, syncStatus } =
-    useAppData(activeTab);
+  const { players, setPlayers, expectedAttendees, setExpectedAttendees, walletEntries, setWalletEntries, syncStatus, syncInfo } =
+    useAppData();
 
   // Search & filters state
   const [searchQuery, setSearchQuery] = useState('');
@@ -103,6 +103,7 @@ export const App: React.FC = () => {
   const {
     handleSavePlayer,
     handleDeletePlayer,
+    handleRestorePlayer,
     handleSaveGroupConfig,
     handleDeleteGroupConfig,
     handleRenameGroupConfig,
@@ -246,6 +247,7 @@ export const App: React.FC = () => {
         mode={mode}
         setMode={setMode}
         syncStatus={syncStatus}
+        syncInfo={syncInfo}
       />
 
       {/* Mobile Bottom Navigation Bar (Floating) */}
@@ -502,6 +504,7 @@ export const App: React.FC = () => {
                 onLockMonth={handleLockMonth}
                 onSignOut={handleSignOut}
                 onSaveSettings={handleSaveSettings}
+                onRestorePlayer={handleRestorePlayer}
               />
             )}
 

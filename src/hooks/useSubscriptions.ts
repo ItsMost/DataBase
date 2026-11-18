@@ -292,7 +292,7 @@ export function useSubscriptions(ctx: AppContextValue) {
       player = await db.players.get(attendee.playerId);
     }
     if (!player) {
-      player = players.find(p => p.name.trim().toLowerCase() === attendee.name.trim().toLowerCase());
+      player = players.find(p => !p.isDeleted && !p.isSystem && p.name.trim().toLowerCase() === attendee.name.trim().toLowerCase());
     }
     
     if (!player) {

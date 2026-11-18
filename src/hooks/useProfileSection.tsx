@@ -36,6 +36,7 @@ export interface ProfileSectionProps {
   onLockMonth: (monthKey: string) => Promise<void>;
   onSignOut: () => Promise<void>;
   onSaveSettings: (next: AppSettings) => Promise<void>;
+  onRestorePlayer: (playerId: string) => Promise<void>;
 }
 
 export function useProfileSection(props: ProfileSectionProps) {
@@ -57,6 +58,7 @@ export function useProfileSection(props: ProfileSectionProps) {
   onLockMonth,
   onSignOut,
   onSaveSettings,
+  onRestorePlayer,
 } = props;
 
   const settings = getSettings(players);
@@ -501,6 +503,7 @@ export function useProfileSection(props: ProfileSectionProps) {
     onLockMonth,
     onSignOut,
     onSaveSettings,
+    onRestorePlayer,
     settings,
     showLockModal,
     setShowLockModal,

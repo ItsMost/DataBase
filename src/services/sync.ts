@@ -18,6 +18,47 @@ function updateSyncStatus(status: 'online' | 'offline' | 'syncing') {
   if (syncStatusCallback) {
     syncStatusCallback(status);
   }
+  void publishSyncInfo();
+}
+
+// ---------------------------------------------------------------------------
+// Pending changes + last real error (shown in the header next to "متصل")
+// ---------------------------------------------------------------------------
+
+export interface SyncInfo {
+  pending: number; // changes saved on the phone that are not in the cloud yet
+  error: string | null; // last server error (not a simple "no internet")
+}
+
+let lastSyncError: string | null = null;
+let syncInfoCallback: ((info: SyncInfo) => void) | null = null;
+
+export function registerSyncInfoCallback(callback: (info: SyncInfo) => void) {
+  syncInfoCallback = callback;
+  void publishSyncInfo();
+}
+
+async function publishSyncInfo() {
+  if (!syncInfoCallback) return;
+  try {
+    const pending = await db.syncQueue.count();
+    syncInfoCallback({ pending, error: lastSyncError });
+  } catch {
+    // database not ready yet: next status change will publish again
+  }
+}
+
+function isNetworkProblem(message: string): boolean {
+  return /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(message);
+}
+
+/** Keep a readable message for real server errors (permissions, invalid data...). */
+function recordSyncError(what: string, error: unknown) {
+  const message =
+    error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : String(error);
+  console.error(`Sync: ${what}`, error);
+  if (!navigator.onLine || isNetworkProblem(message)) return;
+  lastSyncError = `${what}: ${message}`;
 }
 
 /**
@@ -56,7 +97,7 @@ export async function processSyncQueue(): Promise<boolean> {
           if (!error) {
             success = true;
           } else {
-            console.error(`Sync Manager: Error saving player ${item.playerId}`, error);
+            recordSyncError('حفظ لاعب', error);
           }
         } else {
           // Player no longer exists locally, remove from queue
@@ -71,7 +112,7 @@ export async function processSyncQueue(): Promise<boolean> {
         if (!error) {
           success = true;
         } else {
-          console.error(`Sync Manager: Error deleting player ${item.playerId}`, error);
+          recordSyncError('مسح لاعب', error);
         }
       } else if (item.action === 'save_expected') {
         const attendee = await db.expectedToday.get(item.playerId);
@@ -83,7 +124,7 @@ export async function processSyncQueue(): Promise<boolean> {
           if (!error) {
             success = true;
           } else {
-            console.error(`Sync Manager: Error saving expected attendee ${item.playerId}`, error);
+            recordSyncError('حفظ المتوقع', error);
           }
         } else {
           success = true;
@@ -97,7 +138,7 @@ export async function processSyncQueue(): Promise<boolean> {
         if (!error) {
           success = true;
         } else {
-          console.error(`Sync Manager: Error deleting expected attendee ${item.playerId}`, error);
+          recordSyncError('مسح من المتوقع', error);
         }
       } else if (item.action === 'save_wallet') {
         const entry = await db.personalWallet.get(item.playerId);
@@ -109,7 +150,7 @@ export async function processSyncQueue(): Promise<boolean> {
           if (!error) {
             success = true;
           } else {
-            console.error(`Sync Manager: Error saving personal wallet entry ${item.playerId}`, error);
+            recordSyncError('حفظ المحفظة', error);
           }
         } else {
           success = true;
@@ -123,7 +164,7 @@ export async function processSyncQueue(): Promise<boolean> {
         if (!error) {
           success = true;
         } else {
-          console.error(`Sync Manager: Error deleting personal wallet entry ${item.playerId}`, error);
+          recordSyncError('مسح من المحفظة', error);
         }
       }
 
@@ -137,11 +178,12 @@ export async function processSyncQueue(): Promise<boolean> {
       }
     }
 
+    lastSyncError = null;
     updateSyncStatus('online');
     isProcessingQueue = false;
     return true;
   } catch (err) {
-    console.error("Sync Manager: Fatal error in queue processing", err);
+    recordSyncError('طابور المزامنة', err);
     updateSyncStatus('offline');
     isProcessingQueue = false;
     return false;
@@ -178,25 +220,6 @@ export async function syncPlayerToCloud(player: Player) {
 }
 
 /**
- * Queues a delete action locally and attempts online cloud sync.
- */
-export async function deletePlayerFromCloud(playerId: string) {
-  // 1. Always delete locally first
-  await db.players.delete(playerId);
-
-  // 2. Clear any pending saves in queue and add a delete action
-  await db.syncQueue.where('playerId').equals(playerId).delete();
-  await db.syncQueue.add({
-    playerId,
-    action: 'delete',
-    timestamp: Date.now(),
-  });
-
-  // 3. Attempt immediate sync in background
-  processSyncQueue();
-}
-
-/**
  * Syncs all local players to the cloud (bulk operation).
  */
 export async function syncAllToCloud(players: Player[]) {
@@ -207,13 +230,13 @@ export async function syncAllToCloud(players: Player[]) {
     const upsertData = players.map(p => ({ id: String(p.id), player_data: p }));
     const { error } = await supabase.from('players_sync').upsert(upsertData);
     if (error) {
-      console.error("Sync Manager: Bulk upload error:", error);
+      recordSyncError('رفع اللاعيبة', error);
       updateSyncStatus('offline');
     } else {
       updateSyncStatus('online');
     }
   } catch (err) {
-    console.error("Sync Manager: Bulk upload network error:", err);
+    recordSyncError('رفع اللاعيبة', err);
     updateSyncStatus('offline');
   }
 }
@@ -283,7 +306,7 @@ export async function fetchInitialDataFromSupabase(): Promise<Player[]> {
 
     return finalPlayers;
   } catch (e) {
-    console.error("Sync Manager: Initial load network error:", e);
+    recordSyncError('تحميل اللاعيبة', e);
     updateSyncStatus('offline');
     return [];
   }
@@ -396,7 +419,7 @@ export async function fetchInitialExpectedAttendeesFromSupabase(): Promise<Expec
 
     return finalExpected;
   } catch (e) {
-    console.error("Sync Manager: Initial load expected attendees network error:", e);
+    recordSyncError('تحميل المتوقع', e);
     updateSyncStatus('offline');
     return [];
   }
@@ -525,7 +548,7 @@ export async function fetchInitialPersonalWalletFromSupabase(): Promise<Personal
 
     return finalEntries;
   } catch (e) {
-    console.error("Sync Manager: Initial load personal wallet entries network error:", e);
+    recordSyncError('تحميل المحفظة', e);
     updateSyncStatus('offline');
     return [];
   }

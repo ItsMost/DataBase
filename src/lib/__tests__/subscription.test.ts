@@ -208,3 +208,14 @@ describe('old calculation before the cutoff', () => {
     expect(a.attendance.get('2026-10-05')?.charge).toBe(60);
   });
 });
+
+describe('deleted players (trash)', () => {
+  it("their old money stays counted in the reports", () => {
+    const p = player('Z', {
+      isDeleted: true,
+      attendance: ['2026-10-05'],
+      history: [entry('2026-10-05', SINGLE_SESSION, 150, 60)],
+    });
+    expect(computeMonthlyTotals([p], settings)['2026-10']).toEqual({ revenue: 150, cost: 60, expenses: 0, profit: 90 });
+  });
+});

@@ -1,6 +1,6 @@
 /**
  * Loads the data (Dexie first, then the cloud), keeps it live with Supabase Realtime,
- * and runs the daily cleanup. Moved out of App.tsx without changing the logic.
+ * and runs the daily cleanup once a day (services/dailyCleanup.ts).
  */
 import { useState, useEffect } from 'react';
 import type { Player, ExpectedAttendee, PersonalWalletEntry } from '../types';
@@ -8,20 +8,24 @@ import { db, runMigration } from '../services/db';
 import { supabase } from '../services/supabaseClient';
 import {
   registerSyncStatusCallback,
+  registerSyncInfoCallback,
+  type SyncInfo,
   syncPlayerToCloud,
   fetchInitialDataFromSupabase,
   fetchInitialExpectedAttendeesFromSupabase,
   fetchInitialPersonalWalletFromSupabase,
 } from '../services/sync';
 import { runWeeklyBackupIfDue } from '../services/backup';
-import { SETTINGS_ID, SINGLE_SESSION, getSettings } from '../lib/subscription';
+import { runDailyCleanup } from '../services/dailyCleanup';
+import { SETTINGS_ID, getSettings } from '../lib/subscription';
 import { GROUPS_CONFIG_ID } from '../lib/constants';
 import { localToday } from '../lib/dates';
 
 export type SyncStatus = 'online' | 'offline' | 'syncing';
 
-export function useAppData(activeTab: string) {
+export function useAppData() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('offline');
+  const [syncInfo, setSyncInfo] = useState<SyncInfo>({ pending: 0, error: null });
   // Players database state
   const [players, setPlayers] = useState<Player[]>([]);
 
@@ -33,57 +37,11 @@ export function useAppData(activeTab: string) {
   
   // 2. Initialize sync status callbacks
   useEffect(() => {
+    registerSyncInfoCallback(setSyncInfo);
     registerSyncStatusCallback((status) => {
       setSyncStatus(status);
     });
   }, []);
-
-  // Trigger cleanup of "حصة واحدة" subscriptions if the day rolls over during active usage
-  useEffect(() => {
-    const runDailyCleanup = async () => {
-      const todayStr = localToday();
-      // NOTE: automatic deduplication was removed. Duplicate names are only
-      // reported in the roster tab; the coach decides what to delete.
-      const cleanPlayers = await db.players.toArray();
-      let playersUpdated = false;
-      const cleanedPlayers = cleanPlayers.map(p => {
-        if (p.subType === SINGLE_SESSION && p.startDate && p.startDate < todayStr) {
-          playersUpdated = true;
-          return {
-            ...p,
-            subType: '',
-            startDate: '',
-            paid: 0,
-            cost: 0,
-          };
-        }
-        return p;
-      });
-
-      if (playersUpdated) {
-        await db.players.bulkPut(cleanedPlayers);
-        setPlayers(cleanedPlayers);
-      } else {
-        setPlayers(cleanPlayers);
-      }
-
-      // Purge expired expected attendees (date < todayStr)
-      const allExpected = await db.expectedToday.toArray();
-      const expiredExpected = allExpected.filter(att => att.date < todayStr);
-      if (expiredExpected.length > 0) {
-        for (const att of expiredExpected) {
-          await db.expectedToday.delete(att.id);
-        }
-        if (navigator.onLine) {
-          const expiredIds = expiredExpected.map(att => att.id);
-          await supabase.from('expected_today_sync').delete().in('id', expiredIds);
-        }
-        const updatedExpected = await db.expectedToday.toArray();
-        setExpectedAttendees(updatedExpected);
-      }
-    };
-    runDailyCleanup();
-  }, [activeTab]);
 
   // 3. Database Startup & Real-time Cloud Subscriptions
   useEffect(() => {
@@ -101,43 +59,11 @@ export function useAppData(activeTab: string) {
       const cleanPlayers = await db.players.toArray();
       setPlayers(cleanPlayers);
 
-      // Load expected attendees and filter out expired ones locally
-      const allExpected = await db.expectedToday.toArray();
+      // Daily cleanup on this device first (works offline; synced after the cloud pull below)
       const todayStr = localToday();
-      const expiredExpected = allExpected.filter(att => att.date < todayStr);
-      if (expiredExpected.length > 0) {
-        for (const att of expiredExpected) {
-          await db.expectedToday.delete(att.id);
-        }
-        if (navigator.onLine) {
-          const expiredIds = expiredExpected.map(att => att.id);
-          await supabase.from('expected_today_sync').delete().in('id', expiredIds);
-        }
-      }
-      
-      const cleanExpected = await db.expectedToday.toArray();
-      setExpectedAttendees(cleanExpected);
-
-      // Auto-wipe expired single-session subscriptions (yesterday's "حصة واحدة" players)
-      let playersUpdated = false;
-      const cleanedPlayers = cleanPlayers.map(p => {
-        if (p.subType === SINGLE_SESSION && p.startDate && p.startDate < todayStr) {
-          playersUpdated = true;
-          return {
-            ...p,
-            subType: '',
-            startDate: '',
-            paid: 0,
-            cost: 0,
-          };
-        }
-        return p;
-      });
-
-      if (playersUpdated) {
-        await db.players.bulkPut(cleanedPlayers);
-        setPlayers(cleanedPlayers);
-      }
+      await runDailyCleanup({ syncToCloud: false });
+      setPlayers(await db.players.toArray());
+      setExpectedAttendees(await db.expectedToday.toArray());
 
       // Seed group configs from existing database players if sys_groups_config doesn't exist or is empty
       const latestPlayers = await db.players.toArray();
@@ -227,6 +153,13 @@ export function useAppData(activeTab: string) {
               settings: { ...base, v2From: todayStr },
             });
             setPlayers(await db.players.toArray());
+          }
+
+          // Daily cleanup, once a day, synced to the cloud (after the pull so the data is fresh)
+          const cleaned = await runDailyCleanup({ syncToCloud: true });
+          if (cleaned.playersChanged > 0 || cleaned.expectedRemoved > 0) {
+            setPlayers(await db.players.toArray());
+            setExpectedAttendees((await db.expectedToday.toArray()).filter(att => att.date >= todayStr));
           }
 
           // Weekly automatic backup (read-only snapshot to private Storage bucket)
@@ -327,5 +260,6 @@ export function useAppData(activeTab: string) {
     walletEntries,
     setWalletEntries,
     syncStatus,
+    syncInfo,
   };
 }

@@ -56,6 +56,7 @@ export interface Player {
   history?: HistoryEntry[];
   isSystem?: boolean; // True for system configurations like general expenses
   isDeleted?: boolean; // True if the player is soft-deleted/archived
+  deletedAt?: number; // When it was moved to the trash (for the trash list)
   last_updated?: number;
   endMode?: EndMode; // End mode of the current subscription
   settings?: AppSettings; // Only on the 'sys_settings' system record

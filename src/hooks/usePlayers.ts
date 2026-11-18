@@ -40,6 +40,7 @@ export function usePlayers(ctx: AppContextValue) {
       const updatedPlayer: Player = {
         ...p,
         isDeleted: true,
+        deletedAt: Date.now(),
         last_updated: Date.now(),
       };
       await syncPlayerToCloud(updatedPlayer);
@@ -47,7 +48,16 @@ export function usePlayers(ctx: AppContextValue) {
       setPlayers(updatedList);
     }
     setPlayerToDeleteId(null);
-    triggerToast("تم أرشفة اللاعب وإخفاؤه من القائمة بنجاح", true);
+    triggerToast("تم نقل اللاعب لسلة المحذوفات (تقدر ترجّعه من الإعدادات المتقدمة)", true);
+  };
+
+  // Restore a player from the trash (soft delete is never permanent)
+  const handleRestorePlayer = async (playerId: string) => {
+    const p = await db.players.get(playerId);
+    if (!p) return;
+    await syncPlayerToCloud({ ...p, isDeleted: false, deletedAt: undefined, last_updated: Date.now() });
+    setPlayers(await db.players.toArray());
+    triggerToast(`تم استرجاع ${p.name} ✅`);
   };
 
   // Group configurations handlers
@@ -366,6 +376,7 @@ export function usePlayers(ctx: AppContextValue) {
   return {
     handleSavePlayer,
     handleDeletePlayer,
+    handleRestorePlayer,
     handleSaveGroupConfig,
     handleDeleteGroupConfig,
     handleRenameGroupConfig,
