@@ -1,22 +1,32 @@
 import React, { useEffect, useState } from 'react';
+import { processSyncQueue, type SyncInfo } from '../services/sync';
+
+/** Chrome's "install app" event (not in the standard DOM types). */
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
 
 interface HeaderProps {
   mode: string;
   setMode: (mode: string) => void;
   syncStatus: 'online' | 'offline' | 'syncing';
+  syncInfo: SyncInfo;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   mode,
   setMode,
   syncStatus,
+  syncInfo,
 }) => {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showSyncError, setShowSyncError] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
-      setDeferredPrompt(e);
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -28,8 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
   const handleInstallApp = async () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`PWA installation outcome: ${outcome}`);
+    await deferredPrompt.userChoice;
     setDeferredPrompt(null);
   };
 
@@ -70,6 +79,22 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Sync and Actions */}
       <div className="flex gap-2 items-center">
         {getSyncStatusBadge()}
+        {syncInfo.pending > 0 && !syncInfo.error && (
+          <span
+            className="text-amber-400 text-[10px] bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/40 whitespace-nowrap"
+            title="تعديلات محفوظة على الموبايل ولسه مرفعتش على السحابة"
+          >
+            ⏳ {syncInfo.pending} مستني
+          </span>
+        )}
+        {syncInfo.error && (
+          <button
+            onClick={() => setShowSyncError(true)}
+            className="text-white text-[10px] font-black bg-danger px-2 py-0.5 rounded-full border border-danger whitespace-nowrap animate-pulse"
+          >
+            ⚠️ خطأ في المزامنة{syncInfo.pending > 0 ? ` (${syncInfo.pending})` : ''}
+          </button>
+        )}
         {deferredPrompt && (
           <button
             onClick={handleInstallApp}
@@ -85,6 +110,33 @@ export const Header: React.FC<HeaderProps> = ({
           {mode === 'light' ? '☀️' : '🌙'}
         </button>
       </div>
+
+      {showSyncError && syncInfo.error && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm" dir="rtl">
+          <div className="card-bg rounded-lg p-5 w-full max-w-sm border border-danger/50 text-right">
+            <h3 className="text-lg font-bold text-danger mb-2">⚠️ خطأ في المزامنة</h3>
+            <p className="text-sm text-main mb-2">
+              فيه {syncInfo.pending} تعديل محفوظين على الموبايل ومرفعوش على السحابة. مفيش حاجة ضاعت.
+            </p>
+            <pre className="input-bg rounded p-2 text-[11px] whitespace-pre-wrap font-sans border border-theme mb-4" dir="auto">{syncInfo.error}</pre>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowSyncError(false);
+                  processSyncQueue();
+                }}
+                className="w-1/2 text-white font-bold rounded px-3 py-2"
+                style={{ backgroundColor: 'var(--primary)' }}
+              >
+                حاول تاني 🔄
+              </button>
+              <button onClick={() => setShowSyncError(false)} className="w-1/2 input-bg font-bold rounded px-3 py-2 border border-theme">
+                قفل
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

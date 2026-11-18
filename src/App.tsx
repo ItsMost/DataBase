@@ -6,234 +6,33 @@ import { GroupsSection } from './components/GroupsSection';
 import { ProfileSection } from './components/ProfileSection';
 import { ForecastsSection } from './components/ForecastsSection';
 import { DuplicateNamesAlert } from './components/DuplicateNamesAlert';
-import {
-  db,
-  runMigration,
-} from './db';
-import {
-  supabase,
-  registerSyncStatusCallback,
-  syncPlayerToCloud,
-  fetchInitialDataFromSupabase,
-  syncAllToCloud,
-  syncExpectedAttendeeToCloud,
-  deleteExpectedAttendeeFromCloud,
-  fetchInitialExpectedAttendeesFromSupabase,
-  syncPersonalWalletToCloud,
-  deletePersonalWalletFromCloud,
-  fetchInitialPersonalWalletFromSupabase,
-  runWeeklyBackupIfDue,
-  uploadSafetySnapshot,
-} from './supabase';
-import { buildReceiptMessage, whatsAppLink, type ReceiptInfo } from './lib/messages';
+import { SidebarWidget, ExpectedSidebarWidget } from './components/layout/SidebarWidgets';
+import { HistoryModal } from './components/modals/HistoryModal';
+import { AppModals } from './components/modals/AppModals';
+import { supabase } from './services/supabaseClient';
+import { type ReceiptInfo } from './lib/messages';
 
-const MONTH_LOCKS_ID = 'sys_month_locks';
-import type { Player, HistoryEntry, ExpectedAttendee, PersonalWalletEntry, AppSettings, EndMode } from './types';
-import {
-  SETTINGS_ID,
-  SINGLE_SESSION,
-  EXTRA_PAYMENT,
-  DEFAULT_PLACE,
-  ATTEND_ONLY_TYPES,
-  getSettings,
-  analyzePlayer,
-  computeMonthlyTotals,
-  suggestGymCost,
-  isPackageType,
-  packageStart,
-} from './lib/subscription';
-
-interface SidebarWidgetProps {
-  currentProfit: number;
-  highestProfit: number;
-  highestMonthLabel: string;
-  currentMonthLabel: string;
-}
-
-const SidebarWidget: React.FC<SidebarWidgetProps> = ({
-  currentProfit,
-  highestProfit,
-  highestMonthLabel,
-  currentMonthLabel
-}) => {
-  const target = highestProfit <= 0 ? 5000 : highestProfit;
-  const pct = (currentProfit / target) * 100;
-  const clampedPct = Math.min(100, Math.max(0, pct));
-  const isRecordBroken = currentProfit > highestProfit && highestProfit > 0;
-
-  let levelLabel = 'قليل ⚠️';
-  let levelBadgeClass = 'bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50';
-  let meterGradient = 'from-rose-500 to-orange-500';
-
-  if (isRecordBroken) {
-    levelLabel = 'رقم قياسي جديد! 🎉';
-    levelBadgeClass = 'bg-orange-50 dark:bg-orange-950/20 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-900/50 animate-pulse';
-    meterGradient = 'from-orange-500 via-amber-400 to-yellow-300 animate-pulse';
-  } else if (pct >= 80) {
-    levelLabel = 'ممتاز 🏆';
-    levelBadgeClass = 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/50';
-    meterGradient = 'from-orange-500 to-emerald-500';
-  } else if (pct >= 40) {
-    levelLabel = 'متوسط ⚡';
-    levelBadgeClass = 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50';
-    meterGradient = 'from-orange-500 to-amber-500';
-  }
-
-  return (
-    <div className={`card-bg rounded-2xl p-5 border border-theme transition-all duration-500 flex flex-col justify-between select-none ${isRecordBroken ? 'record-breaker-glow' : 'shadow-sm'}`}>
-      <div className="text-center border-b border-theme/30 pb-3 mb-4">
-        <h4 className="text-base font-black text-primary flex items-center justify-center gap-2 glow-text">
-          <span>📊 مقياس الأداء المالي</span>
-        </h4>
-        <p className="text-[10px] text-muted mt-1 font-bold">مقارنة أرباح الشهر الحالي بأعلى شهر تاريخي</p>
-      </div>
-
-      <div className="flex gap-4 items-center justify-center mb-6">
-        {/* Thermometer / Vertical bar meter */}
-        <div className="relative flex flex-col items-center">
-          <div className="text-[10px] text-muted font-bold mb-1">100%</div>
-          <div className="w-6 bg-slate-100 dark:bg-slate-900/60 rounded-full h-48 border border-slate-200 dark:border-slate-800 relative flex flex-col justify-end overflow-hidden shadow-inner">
-            <div 
-              style={{ height: `${clampedPct}%` }}
-              className={`w-full rounded-b-full bg-gradient-to-t ${meterGradient} transition-all duration-1000 ease-out`}
-            />
-            {/* Markers */}
-            <div className="absolute bottom-[40%] left-0 right-0 border-t border-dashed border-slate-300 dark:border-slate-700/60 z-10" title="40% - متوسط" />
-            <div className="absolute bottom-[80%] left-0 right-0 border-t border-dashed border-slate-300 dark:border-slate-700/60 z-10" title="80% - ممتاز" />
-          </div>
-          <div className="text-[10px] text-muted font-bold mt-1">0%</div>
-        </div>
-
-        {/* Text Details & Indicators */}
-        <div className="flex-1 flex flex-col justify-center space-y-4">
-          <div>
-            <span className="text-[11px] text-muted block font-extrabold mb-0.5">أرباح ({currentMonthLabel})</span>
-            <span className="text-2xl font-black text-main text-contrast-bold">
-              {currentProfit} <span className="text-xs font-normal">ج.م</span>
-            </span>
-          </div>
-
-          <div>
-            <span className="text-[11px] text-muted block font-extrabold mb-0.5">الهدف (أعلى شهر)</span>
-            <span className="text-lg font-black text-primary-light text-contrast-bold">
-              {highestProfit > 0 ? highestProfit : '5000'} <span className="text-xs font-normal">ج.م</span>
-            </span>
-            {highestProfit > 0 && (
-              <span className="text-[9px] text-muted block font-extrabold">({highestMonthLabel})</span>
-            )}
-          </div>
-
-          <div>
-            <span className="text-[11px] text-muted block font-extrabold mb-1">مستوى الأداء</span>
-            <span className={`px-2.5 py-0.5 rounded-full text-xs font-black inline-block ${levelBadgeClass}`}>
-              {levelLabel}
-            </span>
-          </div>
-          
-          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-2.5 border border-slate-200 dark:border-slate-800/80 text-center shadow-inner">
-            <span className="text-[10px] text-muted block font-extrabold">النسبة المحققة</span>
-            <span className="text-base font-black text-primary glow-text">
-              {pct.toFixed(1)}%
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Helper descriptive text */}
-      <div className="border-t border-theme/30 pt-3 text-center">
-        {isRecordBroken ? (
-          <div className="text-xs font-bold text-orange-500 animate-bounce">
-            🎉 رائع! تم كسر الرقم القياسي السابق بزيادة <span className="underline">{currentProfit - highestProfit} ج.م</span>!
-          </div>
-        ) : (
-          <div className="text-[11px] text-muted font-extrabold">
-            متبقي <span className="text-primary font-black text-contrast-bold">{target - currentProfit} ج.م</span> لكسر الرقم القياسي
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const formatTimeTo12Hr = (timeStr: string) => {
-  if (!timeStr) return '--:--';
-  const parts = timeStr.split(':');
-  if (parts.length < 2) return timeStr;
-  let hrs = parseInt(parts[0], 10);
-  const mins = parts[1];
-  if (isNaN(hrs)) return timeStr;
-  
-  const ampm = hrs >= 12 ? 'م' : 'ص';
-  hrs = hrs % 12;
-  if (hrs === 0) hrs = 12;
-  
-  return `${hrs}:${mins} ${ampm}`;
-};
-
-interface ExpectedSidebarWidgetProps {
-  expectedAttendees: ExpectedAttendee[];
-}
-
-const ExpectedSidebarWidget: React.FC<ExpectedSidebarWidgetProps> = ({
-  expectedAttendees
-}) => {
-  const activeAttendees = expectedAttendees.filter(att => !att.isDeleted);
-  // Sort attendees chronologically by time
-  const sortedAttendees = [...activeAttendees].sort((a, b) => {
-    return (a.time || '').localeCompare(b.time || '');
-  });
-
-  return (
-    <div className="card-bg rounded-2xl p-4 border border-theme shadow-sm flex flex-col select-none">
-      <div className="flex justify-between items-center border-b border-theme/30 pb-2.5 mb-3">
-        <h4 className="text-sm font-black text-primary flex items-center gap-1.5 glow-text">
-          <span>📋 الحضور المتوقع اليوم</span>
-        </h4>
-        <span className="bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5 rounded-full">
-          {activeAttendees.length}
-        </span>
-      </div>
-
-      {sortedAttendees.length === 0 ? (
-        <div className="text-center text-xs text-muted py-6 font-bold">
-          لا يوجد لاعبين متوقعين اليوم بعد 📋
-        </div>
-      ) : (
-        <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
-          {sortedAttendees.map((att) => (
-            <div 
-              key={att.id} 
-              className="flex justify-between items-center py-2 px-2.5 rounded-xl bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800/80 hover:border-primary/20 hover:bg-primary-glow/5 transition-all"
-            >
-              <span className="text-xs font-bold text-main truncate max-w-[120px]" title={att.name}>
-                {att.name}
-              </span>
-              <span className="text-[10px] font-black text-primary bg-primary-glow px-2 py-0.5 rounded-md border border-primary/10 flex items-center gap-1 whitespace-nowrap">
-                🕒 {formatTimeTo12Hr(att.time)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+import type { Player } from './types';
+import { getSettings, analyzePlayer, computeMonthlyTotals } from './lib/subscription';
+import { MONTH_NAMES, GROUPS_CONFIG_ID, MONTH_LOCKS_ID } from './lib/constants';
+import { localToday } from './lib/dates';
+import type { AppContextValue } from './hooks/appContext';
+import { useAppData } from './hooks/useAppData';
+import { usePlayers } from './hooks/usePlayers';
+import { useSubscriptions } from './hooks/useSubscriptions';
+import { useSettings } from './hooks/useSettings';
+import { useWallet } from './hooks/useWallet';
+import { useDataTools } from './hooks/useDataTools';
 
 export const App: React.FC = () => {
   // Global View states
   const [mode, setMode] = useState(localStorage.getItem('sys_mode') || 'dark');
   const [activeTab, setActiveTab] = useState<'roster' | 'active' | 'groups' | 'profile' | 'forecasts'>('roster');
-  const [syncStatus, setSyncStatus] = useState<'online' | 'offline' | 'syncing'>('offline');
   
-  // Players database state
-  const [players, setPlayers] = useState<Player[]>([]);
+  // Data (Dexie + cloud + realtime) and sync status
+  const { players, setPlayers, expectedAttendees, setExpectedAttendees, walletEntries, setWalletEntries, syncStatus, syncInfo } =
+    useAppData();
 
-  // Expected Attendees state
-  const [expectedAttendees, setExpectedAttendees] = useState<ExpectedAttendee[]>([]);
-
-  // Personal Wallet state
-  const [walletEntries, setWalletEntries] = useState<PersonalWalletEntry[]>([]);
-  
   // Search & filters state
   const [searchQuery, setSearchQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState('All');
@@ -258,20 +57,6 @@ export const App: React.FC = () => {
   const [playerToDeleteId, setPlayerToDeleteId] = useState<string | null>(null);
 
 
-  // General Backup/Import text modals
-  const [showBackupModal, setShowBackupModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [backupText, setBackupText] = useState('');
-  const [importText, setImportText] = useState('');
-  // Import preview (what will change) before anything is written
-  const [importPreview, setImportPreview] = useState<{
-    players: Player[];
-    newCount: number;
-    changedCount: number;
-    unchangedCount: number;
-    notInFileCount: number;
-  } | null>(null);
-  const [importBusy, setImportBusy] = useState(false);
   // WhatsApp receipt offered after a payment
   const [receipt, setReceipt] = useState<ReceiptInfo | null>(null);
 
@@ -280,297 +65,6 @@ export const App: React.FC = () => {
     document.body.setAttribute('data-mode', mode);
     localStorage.setItem('sys_mode', mode);
   }, [mode]);
-
-  // 2. Initialize sync status callbacks
-  useEffect(() => {
-    registerSyncStatusCallback((status) => {
-      setSyncStatus(status);
-    });
-  }, []);
-
-  // Trigger cleanup of "حصة واحدة" subscriptions if the day rolls over during active usage
-  useEffect(() => {
-    const runDailyCleanup = async () => {
-      const todayStr = getTodayDate();
-      // NOTE: automatic deduplication was removed. Duplicate names are only
-      // reported in the roster tab; the coach decides what to delete.
-      const cleanPlayers = await db.players.toArray();
-      let playersUpdated = false;
-      const cleanedPlayers = cleanPlayers.map(p => {
-        if (p.subType === 'حصة واحدة' && p.startDate && p.startDate < todayStr) {
-          playersUpdated = true;
-          return {
-            ...p,
-            subType: '',
-            startDate: '',
-            paid: 0,
-            cost: 0,
-          };
-        }
-        return p;
-      });
-
-      if (playersUpdated) {
-        await db.players.bulkPut(cleanedPlayers);
-        setPlayers(cleanedPlayers);
-      } else {
-        setPlayers(cleanPlayers);
-      }
-
-      // Purge expired expected attendees (date < todayStr)
-      const allExpected = await db.expectedToday.toArray();
-      const expiredExpected = allExpected.filter(att => att.date < todayStr);
-      if (expiredExpected.length > 0) {
-        console.log(`Daily Cleanup (activeTab): Deleting ${expiredExpected.length} expired expected attendees.`);
-        for (const att of expiredExpected) {
-          await db.expectedToday.delete(att.id);
-        }
-        if (navigator.onLine) {
-          const expiredIds = expiredExpected.map(att => att.id);
-          await supabase.from('expected_today_sync').delete().in('id', expiredIds);
-        }
-        const updatedExpected = await db.expectedToday.toArray();
-        setExpectedAttendees(updatedExpected);
-      }
-    };
-    runDailyCleanup();
-  }, [activeTab]);
-
-  // 3. Database Startup & Real-time Cloud Subscriptions
-  useEffect(() => {
-    const initializeData = async () => {
-      // Step A: Run local data migration service
-      await runMigration();
-
-      // Load local wallet entries on startup
-      const localWallet = await db.personalWallet.toArray();
-      setWalletEntries(localWallet);
-
-      // NOTE: startup automatic deduplication was removed (it deleted players
-      // with the same name from this device and the cloud). Duplicates are now
-      // only shown as a warning in the roster tab.
-      const cleanPlayers = await db.players.toArray();
-      setPlayers(cleanPlayers);
-
-      // Load expected attendees and filter out expired ones locally
-      const allExpected = await db.expectedToday.toArray();
-      const todayStr = getTodayDate();
-      const expiredExpected = allExpected.filter(att => att.date < todayStr);
-      if (expiredExpected.length > 0) {
-        console.log(`Startup Cleanup: Deleting ${expiredExpected.length} expired expected attendees.`);
-        for (const att of expiredExpected) {
-          await db.expectedToday.delete(att.id);
-        }
-        if (navigator.onLine) {
-          const expiredIds = expiredExpected.map(att => att.id);
-          await supabase.from('expected_today_sync').delete().in('id', expiredIds);
-        }
-      }
-      
-      const cleanExpected = await db.expectedToday.toArray();
-      setExpectedAttendees(cleanExpected);
-
-      // Auto-wipe expired single-session subscriptions (yesterday's "حصة واحدة" players)
-      let playersUpdated = false;
-      const cleanedPlayers = cleanPlayers.map(p => {
-        if (p.subType === 'حصة واحدة' && p.startDate && p.startDate < todayStr) {
-          playersUpdated = true;
-          return {
-            ...p,
-            subType: '',
-            startDate: '',
-            paid: 0,
-            cost: 0,
-          };
-        }
-        return p;
-      });
-
-      if (playersUpdated) {
-        await db.players.bulkPut(cleanedPlayers);
-        setPlayers(cleanedPlayers);
-      }
-
-      // Seed group configs from existing database players if sys_groups_config doesn't exist or is empty
-      const latestPlayers = await db.players.toArray();
-      const sysGroups = latestPlayers.find(p => p.id === 'sys_groups_config');
-      if (!sysGroups || !sysGroups.history || sysGroups.history.length === 0) {
-        const uniqueSports = [...new Set(latestPlayers.filter(p => !p.isSystem && p.sport && p.sport !== 'العام' && p.sport !== 'General').map(p => p.sport!))];
-        if (uniqueSports.length > 0) {
-          const newSysGroups = {
-            id: 'sys_groups_config',
-            isSystem: true,
-            name: 'إعدادات الجروبات',
-            history: uniqueSports.map((sport, index) => ({
-              desc: sport,
-              subType: 'presence',
-              cost: 0,
-              paid: 0,
-              date: todayStr,
-              timestamp: Date.now() + index
-            }))
-          };
-          await db.players.put(newSysGroups);
-          await syncPlayerToCloud(newSysGroups);
-          const finalReload = await db.players.toArray();
-          setPlayers(finalReload);
-        }
-      }
-
-      // Step B: Pull initial cloud data and merge
-      if (navigator.onLine) {
-        setTimeout(async () => {
-          const syncedPlayers = await fetchInitialDataFromSupabase();
-          if (syncedPlayers.length > 0) {
-            setPlayers(syncedPlayers);
-            // Also seed groups from synced players
-            const sysGroupsSynced = syncedPlayers.find(p => p.id === 'sys_groups_config');
-            if (!sysGroupsSynced || !sysGroupsSynced.history || sysGroupsSynced.history.length === 0) {
-              const uniqueSports = [...new Set(syncedPlayers.filter(p => !p.isSystem && p.sport && p.sport !== 'العام' && p.sport !== 'General').map(p => p.sport!))];
-              if (uniqueSports.length > 0) {
-                const newSysGroups = {
-                  id: 'sys_groups_config',
-                  isSystem: true,
-                  name: 'إعدادات الجروبات',
-                  history: uniqueSports.map((sport, index) => ({
-                    desc: sport,
-                    subType: 'presence',
-                    cost: 0,
-                    paid: 0,
-                    date: todayStr,
-                    timestamp: Date.now() + index
-                  }))
-                };
-                await db.players.put(newSysGroups);
-                await syncPlayerToCloud(newSysGroups);
-                const finalReload = await db.players.toArray();
-                setPlayers(finalReload);
-              }
-            }
-          }
-          const syncedExpected = await fetchInitialExpectedAttendeesFromSupabase();
-          // Filter out expired ones pulled from cloud, and delete them from Supabase too
-          const activeSynced = syncedExpected.filter(att => att.date >= todayStr);
-          const expiredSynced = syncedExpected.filter(att => att.date < todayStr);
-          if (expiredSynced.length > 0) {
-            console.log(`Startup Sync Cleanup: Deleting ${expiredSynced.length} expired expected attendees from cloud.`);
-            const expiredIds = expiredSynced.map(att => att.id);
-            for (const id of expiredIds) {
-              await db.expectedToday.delete(id);
-            }
-            await supabase.from('expected_today_sync').delete().in('id', expiredIds);
-          }
-          setExpectedAttendees(activeSynced);
-
-          // Pull cloud wallet entries and merge
-          const syncedWallet = await fetchInitialPersonalWalletFromSupabase();
-          if (syncedWallet.length > 0) {
-            setWalletEntries(syncedWallet);
-          }
-
-          // Save the cutoff date for the new accounting rules once (synced to all devices).
-          // Attendances before it keep the old calculation, so past months never change.
-          const settingsRec = await db.players.get(SETTINGS_ID);
-          if (!settingsRec?.settings?.v2From) {
-            const base = settingsRec?.settings || getSettings([]);
-            await syncPlayerToCloud({
-              ...(settingsRec || { id: SETTINGS_ID, isSystem: true, name: 'الإعدادات', history: [] }),
-              id: SETTINGS_ID,
-              isSystem: true,
-              settings: { ...base, v2From: todayStr },
-            });
-            setPlayers(await db.players.toArray());
-          }
-
-          // Weekly automatic backup (read-only snapshot to private Storage bucket)
-          runWeeklyBackupIfDue();
-        }, 1000);
-      }
-    };
-
-    initializeData();
-
-    // Step C: Listen to real-time database modifications via Supabase postgres channel
-    const channel = supabase
-      .channel('realtime_sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'players_sync' },
-        async (payload) => {
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const cloudP = payload.new.player_data as Player;
-            if (cloudP && cloudP.id) {
-              const localP = await db.players.get(cloudP.id);
-              if (!localP || (cloudP.last_updated || 0) >= (localP.last_updated || 0)) {
-                await db.players.put(cloudP);
-                const updatedList = await db.players.toArray();
-                setPlayers(updatedList);
-              }
-            }
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = payload.old.id;
-            if (deletedId) {
-              await db.players.delete(deletedId);
-              const updatedList = await db.players.toArray();
-              setPlayers(updatedList);
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'expected_today_sync' },
-        async (payload) => {
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const cloudP = payload.new.attendee_data as ExpectedAttendee;
-            if (cloudP && cloudP.id) {
-              const localP = await db.expectedToday.get(cloudP.id);
-              if (!localP || (cloudP.last_updated || 0) >= (localP.last_updated || 0)) {
-                await db.expectedToday.put(cloudP);
-                const updatedList = await db.expectedToday.toArray();
-                setExpectedAttendees(updatedList);
-              }
-            }
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = payload.old.id;
-            if (deletedId) {
-              await db.expectedToday.delete(deletedId);
-              const updatedList = await db.expectedToday.toArray();
-              setExpectedAttendees(updatedList);
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'personal_wallet_sync' },
-        async (payload) => {
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const cloudEntry = payload.new.entry_data as PersonalWalletEntry;
-            if (cloudEntry && cloudEntry.id) {
-              const localEntry = await db.personalWallet.get(cloudEntry.id);
-              if (!localEntry || (cloudEntry.last_updated || 0) >= (localEntry.last_updated || 0)) {
-                await db.personalWallet.put(cloudEntry);
-                const updatedList = await db.personalWallet.toArray();
-                setWalletEntries(updatedList);
-              }
-            }
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = payload.old.id;
-            if (deletedId) {
-              await db.personalWallet.delete(deletedId);
-              const updatedList = await db.personalWallet.toArray();
-              setWalletEntries(updatedList);
-            }
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   // Toast trigger helper
   const triggerToast = (message: string, isError = false) => {
@@ -582,996 +76,85 @@ export const App: React.FC = () => {
     }, 3000);
   };
 
-  const getTodayDate = () => {
-    const d = new Date();
-    const offset = d.getTimezoneOffset() * 60000;
-    return new Date(d.getTime() - offset).toISOString().split('T')[0];
-  };
+  const getTodayDate = localToday;
 
-  const getFormattedDate = (year: number, month: number, day: number) => {
-    const d = new Date(year, month, day);
-    const offset = d.getTimezoneOffset() * 60000;
-    return new Date(d.getTime() - offset).toISOString().split('T')[0];
-  };
 
   // One expiry/status function for every tab (src/lib/subscription.ts)
   const appSettings = getSettings(players);
   const checkExpiration = (player: Player) => analyzePlayer(player, appSettings).status;
 
-  // --- Core CRUD Actions ---
-
-  // Save/Register Player
-  const handleSavePlayer = async (playerData: Omit<Player, 'attendance' | 'history'>) => {
-    const existing = await db.players.get(playerData.id);
-    const newPlayer: Player = {
-      ...existing,
-      ...playerData,
-      attendance: existing?.attendance || [],
-      history: existing?.history || [],
-    };
-
-    await syncPlayerToCloud(newPlayer);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    setEditingPlayer(null);
-    triggerToast(existing ? "تم تحديث بيانات اللاعب بنجاح ✅" : "تم تسجيل اللاعب في القاعدة بنجاح ✅");
+  // Shared state for the hooks below
+  const ctx: AppContextValue = {
+    players,
+    setPlayers,
+    expectedAttendees,
+    setExpectedAttendees,
+    walletEntries,
+    setWalletEntries,
+    triggerToast,
+    appSettings,
+    setReceipt,
+    setEditingPlayer,
+    playerToDeleteId,
+    setPlayerToDeleteId,
+    checkExpiration,
   };
 
-  // Delete Player
-  const handleDeletePlayer = async () => {
-    if (!playerToDeleteId) return;
-    
-    const p = await db.players.get(playerToDeleteId);
-    if (p) {
-      const updatedPlayer: Player = {
-        ...p,
-        isDeleted: true,
-        last_updated: Date.now(),
-      };
-      await syncPlayerToCloud(updatedPlayer);
-      const updatedList = await db.players.toArray();
-      setPlayers(updatedList);
-    }
-    setPlayerToDeleteId(null);
-    triggerToast("تم أرشفة اللاعب وإخفاؤه من القائمة بنجاح", true);
-  };
+  const {
+    handleSavePlayer,
+    handleDeletePlayer,
+    handleRestorePlayer,
+    handleSaveGroupConfig,
+    handleDeleteGroupConfig,
+    handleRenameGroupConfig,
+    handleMovePlayerToGroup,
+    handleToggleCalendarDay,
+    handleDeleteHistoryEntry,
+    handleSaveExpense,
+    handleDeleteExpense,
+    handleLockMonth,
+  } = usePlayers(ctx);
+  const {
+    handleSaveSubscription,
+    handlePayExtras,
+    handleCancelSubscription,
+    handleAddAttendance,
+    handleRemoveAttendance,
+    handleDeletePlayerTransaction,
+    handleAddExpectedAttendee,
+    handleDeleteExpectedAttendee,
+    handleSaveExpectedAttendee,
+    handleApplyExpectedAttendee,
+  } = useSubscriptions(ctx);
+  const { handleSaveSettings } = useSettings(ctx);
+  const { handleSaveWalletEntry, handleDeleteWalletEntry } = useWallet(ctx);
+  const {
+    handleDeepRecover,
+    handleExportCSV,
+    handleExportJSON,
+    handleCopyBackup,
+    handleDownloadBackupFile,
+    handleImportJSON,
+    handleExecuteImport,
+    handleConfirmImport,
+    handleFileUpload,
+    showBackupModal,
+    setShowBackupModal,
+    showImportModal,
+    setShowImportModal,
+    backupText,
+    importText,
+    setImportText,
+    importPreview,
+    setImportPreview,
+    importBusy,
+  } = useDataTools(ctx);
 
   // Sign out (local Dexie data stays on the device)
   const handleSignOut = async () => {
     await supabase.auth.signOut({ scope: 'local' });
   };
 
-  // Personal Wallet Handlers
-  const handleSaveWalletEntry = async (entryData: Omit<PersonalWalletEntry, 'timestamp'>) => {
-    const existing = await db.personalWallet.get(entryData.id);
-    const newEntry: PersonalWalletEntry = {
-      ...existing,
-      ...entryData,
-      timestamp: existing?.timestamp || Date.now(),
-    };
-
-    await syncPersonalWalletToCloud(newEntry);
-    const updated = await db.personalWallet.toArray();
-    setWalletEntries(updated);
-  };
-
-  const handleDeleteWalletEntry = async (id: string) => {
-    await deletePersonalWalletFromCloud(id);
-    const updated = await db.personalWallet.toArray();
-    setWalletEntries(updated);
-  };
-
-  // Group configurations handlers
-  const handleSaveGroupConfig = async (name: string) => {
-    let sys = await db.players.get('sys_groups_config');
-    if (!sys) {
-      sys = { id: 'sys_groups_config', isSystem: true, name: 'إعدادات الجروبات', history: [] };
-    }
-
-    const history = sys.history ? [...sys.history] : [];
-    const existingIdx = history.findIndex(h => h.desc === name);
-
-    if (existingIdx === -1) {
-      history.push({
-        desc: name,
-        subType: '',
-        cost: 0,
-        paid: 0,
-        date: getTodayDate(),
-        timestamp: Date.now(),
-      });
-    }
-    const updatedSys = { ...sys, history };
-    await syncPlayerToCloud(updatedSys);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast("تم إنشاء الجروب بنجاح ✅");
-  };
-
-  const handleDeleteGroupConfig = async (name: string) => {
-    // 1. Delete group configuration
-    const sys = await db.players.get('sys_groups_config');
-    if (!sys || !sys.history) return;
-
-    const history = sys.history.filter(h => h.desc !== name);
-    const updatedSys = { ...sys, history };
-    await syncPlayerToCloud(updatedSys);
-
-    // 2. Reassign all players in this group to 'العام'
-    const allPlayers = await db.players.toArray();
-    const affectedPlayers = allPlayers.filter(p => !p.isSystem && p.sport === name);
-    const updatedPlayers = affectedPlayers.map(p => ({
-      ...p,
-      sport: 'العام',
-      last_updated: Date.now(),
-    }));
-    if (updatedPlayers.length > 0) {
-      await db.players.bulkPut(updatedPlayers);
-      if (navigator.onLine) {
-        await syncAllToCloud(updatedPlayers);
-      } else {
-        // Queue saves if offline
-        for (const p of updatedPlayers) {
-          const existing = await db.syncQueue
-            .where('playerId')
-            .equals(p.id)
-            .and(item => item.action === 'save')
-            .first();
-          if (!existing) {
-            await db.syncQueue.add({
-              playerId: p.id,
-              action: 'save',
-              timestamp: Date.now(),
-            });
-          }
-        }
-      }
-    }
-
-    // 3. Reassign expected attendees for today to 'العام'
-    const allExpected = await db.expectedToday.toArray();
-    const affectedExpected = allExpected.filter(att => att.sport === name);
-    const updatedExpected = affectedExpected.map(att => ({
-      ...att,
-      sport: 'العام',
-      last_updated: Date.now(),
-    }));
-    if (updatedExpected.length > 0) {
-      await db.expectedToday.bulkPut(updatedExpected);
-      if (navigator.onLine) {
-        const upsertExpectedData = updatedExpected.map(att => ({ id: String(att.id), attendee_data: att }));
-        await supabase.from('expected_today_sync').upsert(upsertExpectedData);
-      } else {
-        // Queue expected today saves if offline
-        for (const att of updatedExpected) {
-          const existing = await db.syncQueue
-            .where('playerId')
-            .equals(att.id)
-            .and(item => item.action === 'save_expected')
-            .first();
-          if (!existing) {
-            await db.syncQueue.add({
-              playerId: att.id,
-              action: 'save_expected',
-              timestamp: Date.now(),
-            });
-          }
-        }
-      }
-      const updatedExpectedList = await db.expectedToday.toArray();
-      setExpectedAttendees(updatedExpectedList);
-    }
-
-    // 4. Reload player list
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast("تم حذف الجروب ونقل اللاعبين لجروب العام بنجاح ✅", true);
-  };
-
-  const handleRenameGroupConfig = async (oldName: string, newName: string) => {
-    if (!newName.trim() || oldName === newName) return;
-
-    // 1. Update config
-    const sys = await db.players.get('sys_groups_config');
-    if (!sys || !sys.history) return;
-
-    const history = sys.history.map(h => {
-      if (h.desc === oldName) {
-        return {
-          ...h,
-          desc: newName.trim(),
-          timestamp: Date.now()
-        };
-      }
-      return h;
-    });
-    const updatedSys = { ...sys, history };
-    await syncPlayerToCloud(updatedSys);
-
-    // 2. Update players
-    const allPlayers = await db.players.toArray();
-    const affectedPlayers = allPlayers.filter(p => !p.isSystem && p.sport === oldName);
-    const updatedPlayers = affectedPlayers.map(p => ({
-      ...p,
-      sport: newName.trim(),
-      last_updated: Date.now(),
-    }));
-    if (updatedPlayers.length > 0) {
-      await db.players.bulkPut(updatedPlayers);
-      if (navigator.onLine) {
-        await syncAllToCloud(updatedPlayers);
-      } else {
-        for (const p of updatedPlayers) {
-          const existing = await db.syncQueue
-            .where('playerId')
-            .equals(p.id)
-            .and(item => item.action === 'save')
-            .first();
-          if (!existing) {
-            await db.syncQueue.add({
-              playerId: p.id,
-              action: 'save',
-              timestamp: Date.now(),
-            });
-          }
-        }
-      }
-    }
-
-    // 3. Update expected attendees for today
-    const allExpected = await db.expectedToday.toArray();
-    const affectedExpected = allExpected.filter(att => att.sport === oldName);
-    const updatedExpected = affectedExpected.map(att => ({
-      ...att,
-      sport: newName.trim(),
-      last_updated: Date.now(),
-    }));
-    if (updatedExpected.length > 0) {
-      await db.expectedToday.bulkPut(updatedExpected);
-      if (navigator.onLine) {
-        const upsertExpectedData = updatedExpected.map(att => ({ id: String(att.id), attendee_data: att }));
-        await supabase.from('expected_today_sync').upsert(upsertExpectedData);
-      } else {
-        for (const att of updatedExpected) {
-          const existing = await db.syncQueue
-            .where('playerId')
-            .equals(att.id)
-            .and(item => item.action === 'save_expected')
-            .first();
-          if (!existing) {
-            await db.syncQueue.add({
-              playerId: att.id,
-              action: 'save_expected',
-              timestamp: Date.now(),
-            });
-          }
-        }
-      }
-      const updatedExpectedList = await db.expectedToday.toArray();
-      setExpectedAttendees(updatedExpectedList);
-    }
-
-    // 4. Reload player list
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast("تم تعديل اسم الجروب وتحديث اللاعبين بنجاح ✅");
-  };
-
-  // Move a player to a different group
-  const handleMovePlayerToGroup = async (playerId: string, groupName: string) => {
-    const p = await db.players.get(playerId);
-    if (!p) return;
-
-    const updatedPlayer: Player = {
-      ...p,
-      sport: groupName,
-      last_updated: Date.now(),
-    };
-    await syncPlayerToCloud(updatedPlayer);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast(`تم نقل اللاعب إلى جروب "${groupName}" بنجاح ✅`);
-  };
-
-  // Save Subscription Payment details
-  const handleSaveSubscription = async (
-    playerId: string,
-    subData: {
-      subType: string;
-      startDate: string;
-      paid: number;
-      cost: number;
-      endMode?: EndMode;
-      place?: string;
-      absorbedExtras?: { date: string; gym: number }[];
-    },
-    isEdit = false
-  ) => {
-    const p = await db.players.get(playerId);
-    if (!p) return;
-
-    const history = p.history ? [...p.history] : [];
-    const endMode = isPackageType(subData.subType) ? (subData.endMode || 'sessions') : undefined;
-    const place = (subData.place || '').trim() || DEFAULT_PLACE;
-
-    // Index of the entry that represents the current subscription (never a "حصص زيادة" payment)
-    let editIdx = -1;
-    if (isEdit) {
-      for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i].subType !== EXTRA_PAYMENT) {
-          editIdx = i;
-          break;
-        }
-      }
-    }
-
-    if (isEdit && editIdx >= 0) {
-      const old = history[editIdx];
-      history[editIdx] = {
-        ...old,
-        // A full renewal keeps its payment day; only the counting start moves
-        ...(old.coverFrom ? { coverFrom: subData.startDate } : { date: subData.startDate }),
-        subType: subData.subType,
-        paid: subData.paid,
-        cost: subData.cost,
-        desc: subData.subType,
-        endMode,
-        place,
-        // Keep the original timestamp (and any absorbed extras) to preserve order
-      };
-    } else {
-      const absorbing = !!(subData.absorbedExtras && subData.absorbedExtras.length > 0);
-      const newHistoryEntry: HistoryEntry = {
-        // Full renewal: money is recorded today (this month's report); sessions count from the first extra
-        date: absorbing ? getTodayDate() : subData.startDate,
-        subType: subData.subType,
-        paid: subData.paid,
-        cost: subData.cost,
-        timestamp: Date.now(),
-        desc: subData.subType,
-        endMode,
-        place,
-      };
-      if (absorbing) {
-        newHistoryEntry.coverFrom = subData.startDate;
-        newHistoryEntry.absorbedExtras = subData.absorbedExtras;
-      }
-      history.push(newHistoryEntry);
-    }
-
-    const attendance = p.attendance ? [...p.attendance] : [];
-    if (subData.subType === SINGLE_SESSION) {
-      if (!attendance.includes(subData.startDate)) {
-        attendance.push(subData.startDate);
-      }
-    }
-
-    const updatedPlayer: Player = {
-      ...p,
-      subType: subData.subType,
-      startDate: subData.startDate,
-      paid: subData.paid,
-      cost: subData.cost,
-      endMode,
-      history,
-      attendance,
-    };
-
-    await syncPlayerToCloud(updatedPlayer);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast(isEdit ? "تم تعديل الاشتراك والدفعة بنجاح ✏️" : "تم تسجيل الدفع وتنشيط الاشتراك بنجاح ✅");
-    if (!isEdit) {
-      setReceipt({ playerId, amount: subData.paid, subType: subData.subType, date: history[history.length - 1].date });
-    }
-  };
-
-  // Pay only the extra sessions: records a "حصص زيادة" payment and clears the balance.
-  // Gym money for those sessions was already counted on the day they were attended, so cost = 0.
-  const handlePayExtras = async (playerId: string, amount: number, extraDates: string[], place?: string) => {
-    const p = await db.players.get(playerId);
-    if (!p || extraDates.length === 0) return;
-
-    const entry: HistoryEntry = {
-      date: getTodayDate(),
-      subType: EXTRA_PAYMENT,
-      desc: `${EXTRA_PAYMENT} (${extraDates.length})`,
-      paid: amount,
-      cost: 0,
-      timestamp: Date.now(),
-      settledExtras: [...extraDates],
-      place: (place || '').trim() || DEFAULT_PLACE,
-    };
-
-    await syncPlayerToCloud({ ...p, history: [...(p.history || []), entry] });
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast(`تم تسجيل دفع ${extraDates.length} حصص زيادة (${amount} ج) ✅`);
-    setReceipt({ playerId, amount, subType: EXTRA_PAYMENT, date: entry.date });
-  };
-
-  // Settings (gym share per session + discount table), synced as a system record
-  const handleSaveSettings = async (next: AppSettings) => {
-    const existing = await db.players.get(SETTINGS_ID);
-    const record: Player = {
-      ...(existing || { id: SETTINGS_ID, isSystem: true, name: 'الإعدادات', history: [] }),
-      id: SETTINGS_ID,
-      isSystem: true,
-      settings: { ...next, v2From: existing?.settings?.v2From || next.v2From || getTodayDate() },
-    };
-    await syncPlayerToCloud(record);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast('تم حفظ الإعدادات ✅');
-  };
-
-  // Cancel Active Subscription
-  const handleCancelSubscription = async (playerId: string) => {
-    const p = await db.players.get(playerId);
-    if (!p) return;
-
-    const updatedPlayer: Player = {
-      ...p,
-      subType: '',
-      startDate: '',
-      paid: 0,
-      cost: 0,
-    };
-
-    await syncPlayerToCloud(updatedPlayer);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast("تم إلغاء الاشتراك بنجاح وتصفير حالة الحصص", true);
-  };
-
-  // Attendance Controls
-  const handleAddAttendance = async (playerId: string, dateStr: string) => {
-    const p = await db.players.get(playerId);
-    if (!p) return;
-
-    const attendance = p.attendance ? [...p.attendance] : [];
-    if (!attendance.includes(dateStr)) {
-      attendance.push(dateStr);
-      const updatedPlayer = { ...p, attendance };
-      await syncPlayerToCloud(updatedPlayer);
-      const updatedList = await db.players.toArray();
-      setPlayers(updatedList);
-      triggerToast(`تم تسجيل حضور يوم ${dateStr} 🟢`);
-    } else {
-      triggerToast("هذا اليوم مسجل مسبقاً للحضور!", true);
-    }
-  };
-
-  const handleRemoveAttendance = async (playerId: string, dateStr: string) => {
-    const p = await db.players.get(playerId);
-    if (!p || !p.attendance) return;
-
-    const attendance = p.attendance.filter(d => d !== dateStr);
-    const updatedPlayer = { ...p, attendance };
-    await syncPlayerToCloud(updatedPlayer);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast(`تم إلغاء حضور يوم ${dateStr} 🔴`, true);
-  };
-
-  // Calendar Attendance click toggle
-  const handleToggleCalendarDay = async (playerId: string, dateStr: string) => {
-    const p = await db.players.get(playerId);
-    if (!p) return;
-
-    const attendance = p.attendance ? [...p.attendance] : [];
-    const index = attendance.indexOf(dateStr);
-    
-    if (index > -1) {
-      attendance.splice(index, 1);
-      triggerToast(`تم إلغاء حضور يوم ${dateStr} 🔴`, true);
-    } else {
-      attendance.push(dateStr);
-      triggerToast(`تم تسجيل حضور يوم ${dateStr} 🟢`);
-    }
-
-    const updatedPlayer = { ...p, attendance };
-    await syncPlayerToCloud(updatedPlayer);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-  };
-
-  const handleDeleteHistoryEntry = async (playerId: string, timestamp: number) => {
-    const p = await db.players.get(playerId);
-    if (!p || !p.history) return;
-
-    const history = p.history.filter(h => h.timestamp !== timestamp);
-    const updatedPlayer = { ...p, history };
-    await syncPlayerToCloud(updatedPlayer);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast("تم مسح المعاملة بنجاح وتحديث الخزنة ✅", true);
-  };
-
-  // Expenses management
-  const handleSaveExpense = async (desc: string, cost: number, date: string, category?: string) => {
-    let sys = await db.players.get('sys_expenses');
-    if (!sys) {
-      sys = { id: 'sys_expenses', isSystem: true, name: 'المصروفات العامة', history: [] };
-    }
-
-    const newExpense: HistoryEntry = {
-      desc,
-      cost,
-      paid: 0,
-      date,
-      timestamp: Date.now(),
-      subType: 'مصروف',
-      category: category || undefined,
-    };
-
-    const updatedSys: Player = {
-      ...sys,
-      history: sys.history ? [...sys.history, newExpense] : [newExpense],
-    };
-
-    await syncPlayerToCloud(updatedSys);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast("تم تسجيل المصروف بنجاح 💸");
-  };
-
-  const handleDeleteExpense = async (timestamp: number) => {
-    const sys = await db.players.get('sys_expenses');
-    if (!sys || !sys.history) return;
-
-    const history = sys.history.filter(h => h.timestamp !== timestamp);
-    const updatedSys = { ...sys, history };
-    await syncPlayerToCloud(updatedSys);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast("تم مسح المصروف وتحديث الخزنة بنجاح ✅", true);
-  };
-
-  const handleDeletePlayerTransaction = async (playerId: string, timestamp: number) => {
-    const p = await db.players.get(playerId);
-    if (!p || !p.history) return;
-
-    // 1. Filter out the transaction to delete from player history
-    const history = p.history.filter(h => h.timestamp !== timestamp);
-    
-    // 2. Identify the deleted entry to see if we need to revert active subscription info
-    const deletedEntry = p.history.find(h => h.timestamp === timestamp);
-    
-    let subType = p.subType;
-    let startDate = p.startDate;
-    let paid = p.paid;
-    let cost = p.cost;
-    let endMode = p.endMode;
-    let attendance = p.attendance ? [...p.attendance] : [];
-
-    // If we deleted the active subscription (usually matches current subscription parameters)
-    const isCurrentSub = p.subType === deletedEntry?.subType && 
-                         p.startDate === (deletedEntry ? packageStart(deletedEntry) : undefined) && 
-                         p.paid === deletedEntry?.paid && 
-                         p.cost === deletedEntry?.cost;
-
-    const subEntries = history.filter(h => h.subType !== EXTRA_PAYMENT);
-    if (isCurrentSub) {
-      if (subEntries.length > 0) {
-        // Revert to the previous subscription entry (skip "حصص زيادة" payments)
-        const prevEntry = subEntries[subEntries.length - 1];
-        subType = prevEntry.subType;
-        startDate = packageStart(prevEntry);
-        paid = prevEntry.paid;
-        cost = prevEntry.cost;
-        endMode = prevEntry.endMode;
-      } else {
-        // Reset if no history left
-        subType = '';
-        startDate = '';
-        paid = 0;
-        cost = 0;
-      }
-    }
-
-    // 3. Revert attendance if it was a single session transaction
-    if (deletedEntry?.subType === 'حصة واحدة') {
-      attendance = attendance.filter(date => date !== deletedEntry.date);
-    }
-
-    const updatedPlayer: Player = {
-      ...p,
-      subType,
-      startDate,
-      paid,
-      cost,
-      endMode,
-      history,
-      attendance,
-      last_updated: Date.now(),
-    };
-
-    await syncPlayerToCloud(updatedPlayer);
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast("تم مسح المعاملة وتحديث بيانات اللاعب بنجاح ✅", true);
-  };
-
-  // --- Expected Attendees Actions ---
-  const handleAddExpectedAttendee = async (attendee: Omit<ExpectedAttendee, 'id'>) => {
-    const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
-    const newAttendee: ExpectedAttendee = {
-      ...attendee,
-      id,
-    };
-    await syncExpectedAttendeeToCloud(newAttendee);
-    const updated = await db.expectedToday.toArray();
-    setExpectedAttendees(updated);
-    triggerToast("تمت الإضافة للمتوقع حضورهم اليوم 📋");
-  };
-
-  const handleDeleteExpectedAttendee = async (id: string) => {
-    await deleteExpectedAttendeeFromCloud(id);
-    const updated = await db.expectedToday.toArray();
-    setExpectedAttendees(updated);
-    triggerToast("تم مسح اللاعب من المتوقع حضورهم", true);
-  };
-
-  const handleSaveExpectedAttendee = async (attendee: ExpectedAttendee) => {
-    await syncExpectedAttendeeToCloud(attendee);
-    const updated = await db.expectedToday.toArray();
-    setExpectedAttendees(updated);
-    triggerToast("تم تعديل موعد وبيانات اللاعب المتوقع بنجاح ✅");
-  };
-
-  const handleApplyExpectedAttendee = async (attendee: ExpectedAttendee) => {
-    // 1. Check if player already exists in the real players database by ID or name
-    let player: Player | undefined;
-    if (attendee.playerId) {
-      player = await db.players.get(attendee.playerId);
-    }
-    if (!player) {
-      player = players.find(p => p.name.trim().toLowerCase() === attendee.name.trim().toLowerCase());
-    }
-    
-    if (!player) {
-      // Create a brand new player
-      let maxNum = 0;
-      players.filter(p => !p.isSystem).forEach(p => {
-        const num = parseInt(p.number || '0', 10);
-        if (!isNaN(num) && num > maxNum) maxNum = num;
-      });
-      const newNum = String(maxNum + 1).padStart(3, '0');
-
-      const newId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
-      const newPlayer: Player = {
-        id: newId,
-        number: newNum,
-        name: attendee.name,
-        sport: attendee.sport || 'العام',
-        attendance: [],
-        history: [],
-      };
-      
-      await db.players.put(newPlayer);
-      player = newPlayer;
-    }
-
-    // 2. Register attendance or subscription / payment for them
-    if (ATTEND_ONLY_TYPES.includes(attendee.subType)) {
-      const attendance = player.attendance ? [...player.attendance] : [];
-      if (!attendance.includes(attendee.date)) {
-        attendance.push(attendee.date);
-      }
-      const updatedPlayer: Player = {
-        ...player,
-        attendance,
-      };
-      await syncPlayerToCloud(updatedPlayer);
-    } else {
-      const newHistoryEntry: HistoryEntry = {
-        date: attendee.date,
-        subType: attendee.subType,
-        paid: attendee.paid,
-        // Gym/place money typed by the coach; old expected rows fall back to the suggestion
-        cost: typeof attendee.cost === 'number'
-          ? attendee.cost
-          : suggestGymCost(appSettings, attendee.subType, attendee.paid || 0, attendee.date),
-        timestamp: Date.now(),
-        desc: attendee.subType,
-        endMode: isPackageType(attendee.subType) ? (attendee.endMode || 'sessions') : undefined,
-        place: (attendee.place || '').trim() || DEFAULT_PLACE,
-      };
-
-      const attendance = player.attendance ? [...player.attendance] : [];
-      if (!attendance.includes(attendee.date)) {
-        attendance.push(attendee.date);
-      }
-
-      const updatedPlayer: Player = {
-        ...player,
-        subType: attendee.subType,
-        startDate: attendee.date,
-        paid: attendee.paid,
-        cost: newHistoryEntry.cost,
-        endMode: newHistoryEntry.endMode,
-        history: player.history ? [...player.history, newHistoryEntry] : [newHistoryEntry],
-        attendance,
-      };
-      await syncPlayerToCloud(updatedPlayer);
-    }
-
-    // 3. Remove from expectedToday
-    if (attendee.id !== undefined) {
-      await deleteExpectedAttendeeFromCloud(attendee.id);
-    }
-
-    // 4. Update states
-    const updatedPlayers = await db.players.toArray();
-    const updatedExpected = await db.expectedToday.toArray();
-    
-    setPlayers(updatedPlayers);
-    setExpectedAttendees(updatedExpected);
-    triggerToast(
-      attendee.subType === 'حضور فقط (مشترك شهرياً)' || attendee.subType === 'حضور فقط'
-        ? `تم تسجيل حضور اللاعب [${attendee.name}] اليوم بنجاح 🟢`
-        : `تم تسجيل الحضور وتفعيل الاشتراك للاعب [${attendee.name}] ✅`
-    );
-    if (!ATTEND_ONLY_TYPES.includes(attendee.subType) && player) {
-      setReceipt({ playerId: player.id, amount: attendee.paid || 0, subType: attendee.subType, date: attendee.date });
-    }
-  };
-
-  // Lock (close) a month. This ONLY marks the month as closed in a system record.
-  // It never deletes or changes history, attendance, subscriptions or money,
-  // so every monthly report keeps showing the month's numbers.
-  const handleLockMonth = async (monthKey: string) => {
-    let sys = await db.players.get(MONTH_LOCKS_ID);
-    if (!sys) {
-      sys = { id: MONTH_LOCKS_ID, isSystem: true, name: 'الشهور المقفولة', history: [] };
-    }
-    const history = sys.history ? [...sys.history] : [];
-    if (history.some(h => h.desc === monthKey)) {
-      triggerToast('الشهر ده مقفول بالفعل 🔒');
-      return;
-    }
-    history.push({
-      desc: monthKey,
-      subType: 'month_lock',
-      cost: 0,
-      paid: 0,
-      date: getTodayDate(),
-      timestamp: Date.now(),
-    });
-    await syncPlayerToCloud({ ...sys, history });
-    const updatedList = await db.players.toArray();
-    setPlayers(updatedList);
-    triggerToast(`تم قفل شهر ${monthKey} 🔒 (كل الأرقام والسجلات محفوظة)`);
-  };
-
-  // Deep backup database recover scanner
-  const handleDeepRecover = async () => {
-    const recoveredMap = new Map<string, Player>();
-    
-    // 1. Read all local storage values that look like JSON arrays
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key) {
-        try {
-          const data = JSON.parse(localStorage.getItem(key) || '');
-          if (Array.isArray(data)) {
-            data.forEach((p: Player) => {
-              if (p && p.id && p.name) {
-                recoveredMap.set(String(p.id), p);
-              }
-            });
-          }
-        } catch {}
-      }
-    }
-
-    // 2. Read native IDB ('SystemPlayersDB')
-    try {
-      const idbPlayers = await new Promise<Player[]>((resolve) => {
-        const req = indexedDB.open("SystemPlayersDB", 1);
-        req.onsuccess = (e) => {
-          const nativeDb = (e.target as IDBOpenDBRequest).result;
-          if (!nativeDb.objectStoreNames.contains("state")) {
-            nativeDb.close();
-            resolve([]);
-            return;
-          }
-          try {
-            const tx = nativeDb.transaction("state", "readonly");
-            const store = tx.objectStore("state");
-            const getReq = store.get("playersData");
-            getReq.onsuccess = () => {
-              nativeDb.close();
-              resolve(Array.isArray(getReq.result) ? getReq.result : []);
-            };
-            getReq.onerror = () => {
-              nativeDb.close();
-              resolve([]);
-            };
-          } catch {
-            nativeDb.close();
-            resolve([]);
-          }
-        };
-        req.onerror = () => resolve([]);
-      });
-
-      idbPlayers.forEach((p) => {
-        if (p && p.id && p.name) {
-          recoveredMap.set(String(p.id), p);
-        }
-      });
-    } catch {}
-
-    // 3. Keep newer records
-    players.forEach(p => {
-      recoveredMap.set(String(p.id), p);
-    });
-
-    const newPlayers = Array.from(recoveredMap.values());
-    
-    if (newPlayers.length > players.length) {
-      await db.players.bulkPut(newPlayers);
-      if (navigator.onLine) {
-        await syncAllToCloud(newPlayers);
-      }
-      setPlayers(newPlayers);
-      triggerToast(`تم استرجاع ${newPlayers.length} ملفات بنجاح! ✅`);
-    } else {
-      triggerToast("لم يتم العثور على أي ملفات احتياطية قديمة.", true);
-    }
-  };
-
-  // CSV Sheet download
-  const handleExportCSV = () => {
-    let csvContent = '\uFEFF'; // Excel UTF-8 BOM to support Arabic letters
-    csvContent += "الرقم,الاسم,رقم الموبايل,الرياضة,حالة الاشتراك,تاريخ البداية,إجمالي الدفع,إجمالي تكلفة الجيم,صافي الربح\n";
-    
-    players.filter(p => !p.isSystem && !p.isDeleted).forEach(p => {
-      let totalPaid = 0;
-      let totalCost = 0;
-      if (p.history) {
-        p.history.forEach(h => {
-          totalPaid += h.paid || 0;
-          totalCost += h.cost || 0;
-        });
-      }
-      const net = totalPaid - totalCost;
-      const expInfo = checkExpiration(p);
-      const status = p.subType && !expInfo.isExpired ? "ساري" : "منتهي/غير مسدد";
-      
-      const cleanName = (p.name || '').replace(/,/g, ' ');
-      const cleanSport = (p.sport || '').replace(/,/g, ' ');
-      
-      const row = `${p.number || '-'},${cleanName},${p.phone || '-'},${cleanSport},${status},${p.startDate || '-'},${totalPaid},${totalCost},${net}`;
-      csvContent += row + "\n";
-    });
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Gym_Players_Report_${getTodayDate()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    triggerToast("تم تصدير الداتا بنجاح في ملف إكسيل 📊");
-  };
-
-  const handleExportJSON = () => {
-    const dataStr = JSON.stringify(players);
-    setBackupText(dataStr);
-    setShowBackupModal(true);
-  };
-
-  const handleCopyBackup = () => {
-    navigator.clipboard.writeText(backupText);
-    triggerToast("تم نسخ الكود! اذهب لعمل (لصق/Paste) في مكان آمن ✅");
-    setShowBackupModal(false);
-  };
-
-  const handleDownloadBackupFile = () => {
-    const blob = new Blob([backupText], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Gym_System_Backup_${getTodayDate()}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    triggerToast("تم تنزيل ملف النسخة الاحتياطية بنجاح 📁✅");
-    setShowBackupModal(false);
-  };
-
-  const handleImportJSON = () => {
-    setImportText('');
-    setShowImportModal(true);
-  };
-
-  // Step 1: read the file/code and show what will change (nothing is written yet)
-  const handleExecuteImport = async () => {
-    if (!importText.trim()) {
-      alert("الرجاء لصق الكود أولاً!");
-      return;
-    }
-    try {
-      const parsed = JSON.parse(importText);
-      // Accept the manual export (array) and the weekly backup ({ players: [...] })
-      const list: Player[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.players) ? parsed.players : null;
-      if (!list || list.some(p => !p || !p.id)) {
-        triggerToast("كود تالف وغير صحيح!", true);
-        return;
-      }
-      const current = new Map((await db.players.toArray()).map(p => [String(p.id), p]));
-      const fileIds = new Set(list.map(p => String(p.id)));
-      let newCount = 0;
-      let changedCount = 0;
-      let unchangedCount = 0;
-      list.forEach(p => {
-        const cur = current.get(String(p.id));
-        if (!cur) newCount++;
-        else if (JSON.stringify(cur) !== JSON.stringify(p)) changedCount++;
-        else unchangedCount++;
-      });
-      const notInFileCount = [...current.values()].filter(p => !p.isSystem && !fileIds.has(String(p.id))).length;
-      setImportPreview({ players: list, newCount, changedCount, unchangedCount, notInFileCount });
-    } catch {
-      triggerToast("كود غير مكتمل أو منتهي الصلاحية!", true);
-    }
-  };
-
-  // Step 2 (after confirmation): automatic safety backup, then add/update only (nothing is deleted)
-  const handleConfirmImport = async () => {
-    if (!importPreview) return;
-    setImportBusy(true);
-    try {
-      const snap = await uploadSafetySnapshot('pre-import');
-      if (!snap.uploaded) {
-        // Cloud backup not possible: keep a copy on the device and download it
-        try {
-          localStorage.setItem('pre_import_backup', snap.json);
-        } catch {}
-        const blob = new Blob([snap.json], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Backup_before_import_${getTodayDate()}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
-      await db.players.bulkPut(importPreview.players);
-      if (navigator.onLine) {
-        await syncAllToCloud(importPreview.players);
-      }
-      setPlayers(await db.players.toArray());
-      triggerToast(
-        snap.uploaded
-          ? "تم الاسترجاع ✅ (اتعملت نسخة احتياطية على السحابة قبلها)"
-          : "تم الاسترجاع ✅ (النسخة الاحتياطية اتنزلت على الجهاز)"
-      );
-      setImportPreview(null);
-      setShowImportModal(false);
-    } finally {
-      setImportBusy(false);
-    }
-  };
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const content = e.target?.result as string;
-      setImportText(content);
-    };
-    reader.readAsText(file);
-  };
 
   // --- Shared computed stats for Header dashboard ---
   const monthlyTotals = computeMonthlyTotals(players, appSettings);
@@ -1586,11 +169,7 @@ export const App: React.FC = () => {
       expenses: m.expenses,
     };
   };
-
-  const monthNames = [
-    'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-    'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-  ];
+  const monthNames = MONTH_NAMES;
   const monthBenefit = getCurrentMonthBenefit();
   const currentMonthLabel = monthNames[new Date().getMonth()];
 
@@ -1632,45 +211,6 @@ export const App: React.FC = () => {
 
   const highestStats = getHighestMonthStats();
 
-  const getCalendarDays = () => {
-    if (!historyPlayerId) return [];
-    const p = players.find(x => x.id === historyPlayerId);
-    if (!p) return [];
-
-    const year = calCurrentDate.getFullYear();
-    const month = calCurrentDate.getMonth();
-    
-    const firstDay = new Date(year, month, 1).getDay();
-    const lastDate = new Date(year, month + 1, 0).getDate();
-
-    const cells = [];
-    // Padding for empty days at start of month
-    for (let i = 0; i < firstDay; i++) {
-      cells.push(<div key={`empty-${i}`}></div>);
-    }
-
-    const attendanceSet = new Set(p.attendance || []);
-    for (let i = 1; i <= lastDate; i++) {
-      const formattedDate = getFormattedDate(year, month, i);
-      const isAttended = attendanceSet.has(formattedDate);
-      const dayClass = isAttended
-        ? "cal-attended hover:opacity-80 cursor-pointer"
-        : "cal-empty input-bg border border-theme hover:bg-primary-glow/20 cursor-pointer transition-all";
-
-      cells.push(
-        <div
-          key={i}
-          className={`cal-day ${dayClass}`}
-          onClick={() => handleToggleCalendarDay(historyPlayerId, formattedDate)}
-          title="اضغط لتسجيل/إلغاء الحضور"
-        >
-          {i}
-        </div>
-      );
-    }
-    return cells;
-  };
-
   const historyPlayer = players.find(x => x.id === historyPlayerId);
 
   // Compute group lists suggestions dynamically
@@ -1678,7 +218,7 @@ export const App: React.FC = () => {
   const currentGroups = players.filter(p => !p.isSystem && !p.isDeleted).map(p => p.sport || 'العام');
 
   // Load groups configurations
-  const groupsConfigPlayer = players.find(p => p.id === 'sys_groups_config');
+  const groupsConfigPlayer = players.find(p => p.id === GROUPS_CONFIG_ID);
   const groupsConfig = groupsConfigPlayer?.history || [];
   const configuredGroups = groupsConfig.map(h => h.desc);
 
@@ -1707,6 +247,7 @@ export const App: React.FC = () => {
         mode={mode}
         setMode={setMode}
         syncStatus={syncStatus}
+        syncInfo={syncInfo}
       />
 
       {/* Mobile Bottom Navigation Bar (Floating) */}
@@ -1963,6 +504,7 @@ export const App: React.FC = () => {
                 onLockMonth={handleLockMonth}
                 onSignOut={handleSignOut}
                 onSaveSettings={handleSaveSettings}
+                onRestorePlayer={handleRestorePlayer}
               />
             )}
 
@@ -1992,315 +534,45 @@ export const App: React.FC = () => {
 
       {/* --- Overlay Modals --- */}
 
-      {/* A. Global History Modal (Reversing history array exactly like native openHistory) */}
+      {/* A. Player history (payments + attendance calendar) */}
       {historyPlayerId && historyPlayer && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-5 w-full max-w-lg relative h-[85vh] flex flex-col border border-theme">
-            <button
-              onClick={() => setHistoryPlayerId(null)}
-              className="absolute top-4 left-4 text-muted hover:text-main input-bg p-1 rounded-full border border-theme"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </button>
-            <h3 className="text-xl font-bold text-primary mb-1 glow-text">سجل اللاعب</h3>
-            <p className="text-primary-light mb-4 text-sm font-bold">
-              [#{historyPlayer.number}] {historyPlayer.name}
-            </p>
-            
-            <div className="flex border-b border-theme mb-4">
-              <button
-                onClick={() => setHistoryTab('payments')}
-                className={`w-1/2 py-2 text-center text-sm font-bold transition-all rounded-t-lg ${
-                  historyTab === 'payments' ? 'tab-active' : 'tab-inactive'
-                }`}
-              >
-                المدفوعات
-              </button>
-              <button
-                onClick={() => setHistoryTab('calendar')}
-                className={`w-1/2 py-2 text-center text-sm font-bold transition-all rounded-t-lg ${
-                  historyTab === 'calendar' ? 'tab-active' : 'tab-inactive'
-                }`}
-              >
-                أيام الحضور 📅
-              </button>
-            </div>
-
-            {/* Payments Sub tab logs */}
-            {historyTab === 'payments' && (
-              <div className="overflow-y-auto pr-1 flex-1 space-y-3 block">
-                {!historyPlayer.history || historyPlayer.history.length === 0 ? (
-                  <div className="text-center text-muted py-6 border border-dashed border-theme rounded-lg">
-                    لا يوجد سجل مدفوعات سابق للاعب.
-                  </div>
-                ) : (
-                  [...historyPlayer.history].reverse().map(h => (
-                    <div
-                      key={h.timestamp}
-                      className="input-bg rounded-lg p-3 text-right shadow-sm border border-theme relative mb-3"
-                    >
-                      <button
-                        onClick={() => handleDeleteHistoryEntry(historyPlayer.id, h.timestamp)}
-                        className="absolute top-3 left-3 text-danger hover:text-red-400 bg-danger/10 px-2 py-1 rounded text-xs transition-all border border-danger/20"
-                      >
-                        مسح 🗑️
-                      </button>
-                      <div className="flex justify-between items-center border-b border-theme pb-2 mb-2 pr-16">
-                        <span className="text-primary font-bold bg-primary-glow px-2 py-1 rounded text-xs">
-                          {h.subType}
-                        </span>
-                        <span className="text-muted text-xs flex items-center gap-1">
-                          🕒 {new Date(h.date).toLocaleDateString('en-GB')}
-                        </span>
-                      </div>
-                      
-                      <div className="flex justify-between text-sm px-1">
-                        <div>
-                          <span className="text-muted text-xs block mb-1">المبلغ</span>
-                          <span className="text-success font-bold">{h.paid} ج</span>
-                        </div>
-                        <div>
-                          <span className="text-muted text-xs block mb-1">الجيم</span>
-                          <span className="text-danger font-bold">{h.cost} ج</span>
-                        </div>
-                        <div>
-                          <span className="text-muted text-xs block mb-1">الربح</span>
-                          <span className="text-primary font-bold glow-text">{(h.paid || 0) - (h.cost || 0)} ج</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Calendar attendance tracker sub tab */}
-            {historyTab === 'calendar' && (
-              <div className="overflow-y-auto pr-1 flex-1">
-                <div className="input-bg rounded-lg p-4 border border-theme">
-                  <div className="text-center text-[10px] text-primary mb-3 glow-text font-bold">
-                    💡 اضغط على أي يوم لتسجيل أو إلغاء الحضور للّاعب
-                  </div>
-                  <div className="flex justify-between items-center mb-4">
-                    <button
-                      onClick={() => {
-                        const newD = new Date(calCurrentDate);
-                        newD.setMonth(newD.getMonth() - 1);
-                        setCalCurrentDate(newD);
-                      }}
-                      className="text-primary hover:text-primary-light bg-transparent px-3 py-1 rounded border border-theme"
-                    >
-                      ◀
-                    </button>
-                    <span className="text-primary-light font-bold text-base glow-text">
-                      {calCurrentDate.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })}
-                    </span>
-                    <button
-                      onClick={() => {
-                        const newD = new Date(calCurrentDate);
-                        newD.setMonth(newD.getMonth() + 1);
-                        setCalCurrentDate(newD);
-                      }}
-                      className="text-primary hover:text-primary-light bg-transparent px-3 py-1 rounded border border-theme"
-                    >
-                      ▶
-                    </button>
-                  </div>
-                  
-                  <div className="grid grid-cols-7 gap-1 text-center text-xs text-muted mb-2 font-bold">
-                    <div>أحد</div><div>إثنين</div><div>ثلاثاء</div><div>أربعاء</div><div>خميس</div><div>جمعة</div><div>سبت</div>
-                  </div>
-                  
-                  <div className="grid grid-cols-7 gap-1 text-center">
-                    {getCalendarDays()}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <HistoryModal
+          historyPlayer={historyPlayer}
+          historyTab={historyTab}
+          setHistoryTab={setHistoryTab}
+          calCurrentDate={calCurrentDate}
+          setCalCurrentDate={setCalCurrentDate}
+          setHistoryPlayerId={setHistoryPlayerId}
+          handleDeleteHistoryEntry={handleDeleteHistoryEntry}
+          handleToggleCalendarDay={handleToggleCalendarDay}
+        />
       )}
 
-      {/* B. Player Delete Confirmation Modal */}
-      {playerToDeleteId && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-6 w-full max-w-sm text-center border border-theme">
-            <h3 className="text-xl font-bold text-danger mb-2">تحذير النظام!</h3>
-            <p className="text-main mb-6">هل أنت متأكد من حذف هذا اللاعب تماماً من القاعدة؟</p>
-            <div className="flex gap-3">
-              <button
-                onClick={handleDeletePlayer}
-                className="w-1/2 bg-danger text-danger border border-danger font-bold rounded-md px-4 py-2"
-              >
-                تأكيد
-              </button>
-              <button
-                onClick={() => setPlayerToDeleteId(null)}
-                className="w-1/2 input-bg font-bold rounded-md px-4 py-2"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* D. Backup/Export JSON Code Modal */}
-      {showBackupModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-5 w-full max-w-sm relative flex flex-col border border-theme">
-            <button
-              onClick={() => setShowBackupModal(false)}
-              className="absolute top-4 left-4 text-muted hover:text-main input-bg p-1 rounded-full border border-theme"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </button>
-            <h3 className="text-lg font-bold text-blue-500 mb-2">حفظ النسخة الاحتياطية</h3>
-            <p className="text-xs text-muted mb-4">يفضل استخدام (تنزيل ملف) والاحتفاظ به لحماية بياناتك بالكامل.</p>
-            <textarea
-              readOnly
-              value={backupText}
-              className="w-full h-24 input-bg rounded p-3 text-left text-xs mb-4 opacity-70"
-              style={{ direction: 'ltr', resize: 'none' }}
-            ></textarea>
-            <div className="flex gap-2">
-              <button
-                onClick={handleCopyBackup}
-                className="w-1/2 bg-blue-500/20 text-blue-400 font-bold rounded px-3 py-2 border border-blue-500/50 hover:bg-blue-500 hover:text-white transition-colors text-sm"
-              >
-                نسخ الكود 📋
-              </button>
-              <button
-                onClick={handleDownloadBackupFile}
-                className="w-1/2 bg-blue-500 text-white font-bold rounded px-3 py-2 shadow-lg text-sm"
-              >
-                تنزيل ملف 📁
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* E. Import JSON Code Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-5 w-full max-w-sm relative flex flex-col border border-theme">
-            <button
-              onClick={() => setShowImportModal(false)}
-              className="absolute top-4 left-4 text-muted hover:text-main input-bg p-1 rounded-full border border-theme"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </button>
-            <h3 className="text-lg font-bold text-green-500 mb-2">استرجاع البيانات</h3>
-            <p className="text-xs text-muted mb-4">اختر ملف النسخة الاحتياطية الذي قمت بتنزيله، أو الصق الكود هنا.</p>
-            <textarea
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              placeholder="أو الصق الكود هنا..."
-              className="w-full h-24 input-bg rounded p-3 text-left text-xs mb-4"
-              style={{ direction: 'ltr', resize: 'none' }}
-            ></textarea>
-            
-            <input
-              type="file"
-              id="importFileInput"
-              accept=".txt,.json"
-              className="hidden"
-              onChange={handleFileUpload}
-            />
-            
-            <div className="flex gap-2">
-              <button
-                onClick={handleExecuteImport}
-                className="w-1/2 bg-green-500/20 text-green-400 font-bold rounded px-3 py-2 border border-green-500/50 hover:bg-green-500 hover:text-white transition-colors text-sm"
-              >
-                لصق واسترجاع 🔄
-              </button>
-              <button
-                onClick={() => document.getElementById('importFileInput')?.click()}
-                className="w-1/2 bg-green-500 text-white font-bold rounded px-3 py-2 shadow-lg text-sm"
-              >
-                رفع الملف 📁
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* F. Import confirmation */}
-      {importPreview && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-5 w-full max-w-sm border border-theme text-right">
-            <h3 className="text-lg font-bold text-green-500 mb-3">تأكيد الاسترجاع</h3>
-            <div className="space-y-1 text-sm mb-3">
-              <div>لاعيبة جديدة هتتضاف: <b className="text-success">{importPreview.newCount}</b></div>
-              <div>لاعيبة هتتغير لنسخة الملف: <b className="text-amber-400">{importPreview.changedCount}</b></div>
-              <div>زي ما هم: <b className="text-muted">{importPreview.unchangedCount}</b></div>
-              <div>مش موجودين في الملف (هيفضلوا زي ما هم): <b className="text-main">{importPreview.notInFileCount}</b></div>
-            </div>
-            <p className="text-[11px] text-muted mb-4 leading-relaxed">
-              قبل أي تغيير هتتعمل نسخة احتياطية أوتوماتيك. مفيش أي لاعب هيتمسح.
-            </p>
-            <div className="flex gap-2">
-              <button
-                disabled={importBusy}
-                onClick={handleConfirmImport}
-                className="w-1/2 bg-green-500 text-white font-bold rounded px-3 py-2 disabled:opacity-50"
-              >
-                {importBusy ? 'جاري...' : 'تأكيد الاسترجاع'}
-              </button>
-              <button
-                disabled={importBusy}
-                onClick={() => setImportPreview(null)}
-                className="w-1/2 input-bg font-bold rounded px-3 py-2 border border-theme"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* G. WhatsApp receipt after a payment */}
-      {receipt && (() => {
-        const rp = players.find(p => p.id === receipt.playerId);
-        if (!rp) return null;
-        const text = buildReceiptMessage(rp, receipt, appSettings);
-        const link = whatsAppLink(rp.phone, text);
-        return (
-          <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="card-bg rounded-lg p-5 w-full max-w-sm border border-theme text-right">
-              <h3 className="text-lg font-bold text-success mb-2">🧾 إيصال الدفع: {rp.name}</h3>
-              <pre className="input-bg rounded p-3 text-xs whitespace-pre-wrap font-sans border border-theme mb-4">{text}</pre>
-              <div className="flex gap-2">
-                {link ? (
-                  <a
-                    href={link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => setReceipt(null)}
-                    className="w-1/2 text-white font-bold rounded px-3 py-2 text-center"
-                    style={{ backgroundColor: '#16a34a' }}
-                  >
-                    إرسال واتساب 💬
-                  </a>
-                ) : (
-                  <div className="w-1/2 text-[11px] text-muted text-center self-center">مفيش رقم موبايل للاعب</div>
-                )}
-                <button onClick={() => setReceipt(null)} className="w-1/2 input-bg font-bold rounded px-3 py-2 border border-theme">
-                  قفل
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* B-G. Delete / backup / import / receipt dialogs */}
+      <AppModals
+        players={players}
+        appSettings={appSettings}
+        playerToDeleteId={playerToDeleteId}
+        setPlayerToDeleteId={setPlayerToDeleteId}
+        handleDeletePlayer={handleDeletePlayer}
+        showBackupModal={showBackupModal}
+        setShowBackupModal={setShowBackupModal}
+        backupText={backupText}
+        handleCopyBackup={handleCopyBackup}
+        handleDownloadBackupFile={handleDownloadBackupFile}
+        showImportModal={showImportModal}
+        setShowImportModal={setShowImportModal}
+        importText={importText}
+        setImportText={setImportText}
+        handleExecuteImport={handleExecuteImport}
+        handleFileUpload={handleFileUpload}
+        importPreview={importPreview}
+        setImportPreview={setImportPreview}
+        importBusy={importBusy}
+        handleConfirmImport={handleConfirmImport}
+        receipt={receipt}
+        setReceipt={setReceipt}
+      />
 
       {/* --- Floating Toast Notification Alert --- */}
       <div

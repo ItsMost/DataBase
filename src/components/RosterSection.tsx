@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { Player } from '../types';
 import { getSettings, analyzePlayer } from '../lib/subscription';
 import { buildReminderMessage, whatsAppLink } from '../lib/messages';
+import { currentMonthKey } from '../lib/dates';
 
 interface RosterSectionProps {
   players: Player[];
@@ -34,14 +35,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
   onPayExtras,
   allGroups,
 }) => {
-  // Get today's local year and month in YYYY-MM format
-  const currentMonthPrefix = (() => {
-    const d = new Date();
-    const offset = d.getTimezoneOffset() * 60000;
-    const localDateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
-    const parts = localDateStr.split('-');
-    return `${parts[0]}-${parts[1]}`;
-  })();
+  const currentMonthPrefix = currentMonthKey(); // 'YYYY-MM'
 
   // Form states
   const [name, setName] = useState('');
@@ -57,26 +51,6 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
   const [muscle, setMuscle] = useState('');
   
   const [formError, setFormError] = useState(false);
-
-  // Sync form with editing player
-  useEffect(() => {
-    if (editingPlayer) {
-      setName(editingPlayer.name || '');
-      setNumber(editingPlayer.number || '');
-      setBirthYear(editingPlayer.birthYear ? String(editingPlayer.birthYear) : '');
-      setGroup(editingPlayer.sport || '');
-      setClub(editingPlayer.club || '');
-      setPhone(editingPlayer.phone || '');
-      setPosition(editingPlayer.position || '');
-      setHeight(editingPlayer.height ? String(editingPlayer.height) : '');
-      setWeight(editingPlayer.weight ? String(editingPlayer.weight) : '');
-      setFat(editingPlayer.fat ? String(editingPlayer.fat) : '');
-      setMuscle(editingPlayer.muscle ? String(editingPlayer.muscle) : '');
-    } else {
-      clearForm();
-      setNextNumber();
-    }
-  }, [editingPlayer, players]);
 
   const setNextNumber = () => {
     if (editingPlayer) return;
@@ -101,6 +75,30 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
     setMuscle('');
     setFormError(false);
   };
+
+  // Sync form with editing player
+  useEffect(() => {
+    if (editingPlayer) {
+      // Prefilling the form from the player chosen for editing is intended here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setName(editingPlayer.name || '');
+      setNumber(editingPlayer.number || '');
+      setBirthYear(editingPlayer.birthYear ? String(editingPlayer.birthYear) : '');
+      setGroup(editingPlayer.sport || '');
+      setClub(editingPlayer.club || '');
+      setPhone(editingPlayer.phone || '');
+      setPosition(editingPlayer.position || '');
+      setHeight(editingPlayer.height ? String(editingPlayer.height) : '');
+      setWeight(editingPlayer.weight ? String(editingPlayer.weight) : '');
+      setFat(editingPlayer.fat ? String(editingPlayer.fat) : '');
+      setMuscle(editingPlayer.muscle ? String(editingPlayer.muscle) : '');
+    } else {
+      clearForm();
+      setNextNumber();
+    }
+    // Only when the edited player / list changes (not on every render of the helpers).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingPlayer, players]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

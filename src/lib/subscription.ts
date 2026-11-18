@@ -10,84 +10,60 @@
  * History rule: attendances BEFORE settings.v2From are charged with the exact old
  * calculation (legacyAttendanceCharge), so past months never change.
  *
- * Only `import type` here, so this file also runs directly in Node for checks.
+ * Pure functions only (no React, no database) so they can be unit-tested.
  */
-import type { Player, HistoryEntry, AppSettings, EndMode } from '../types';
+import type {
+  Player,
+  HistoryEntry,
+  AppSettings,
+  EndMode,
+} from '../types';
 
-export const SINGLE_SESSION = 'حصة واحدة';
-export const EXTRA_PAYMENT = 'حصص زيادة';
-export const ATTEND_ONLY_TYPES = ['حضور فقط (مشترك شهرياً)', 'حضور فقط'];
-export const SETTINGS_ID = 'sys_settings';
-export const DEFAULT_PLACE = 'الجيم';
+import {
+  SINGLE_SESSION,
+  EXTRA_PAYMENT,
+  SETTINGS_ID,
+  EXPENSES_ID,
+  DEFAULT_EXPENSE_CATEGORIES,
+  DEFAULT_INACTIVE_DAYS,
+  DEFAULT_REMINDER_TEMPLATE,
+  DEFAULT_RECEIPT_TEMPLATE,
+  DEFAULT_GYM_RATE,
+  DEFAULT_DISCOUNT_THRESHOLD,
+  DEFAULT_DISCOUNT_TIERS,
+  ATTEND_ONLY_TYPES,
+} from './constants';
+import {
+  localToday,
+  diffDays,
+  addDays,
+  addOneMonth,
+  formatDate,
+} from './dates';
+
+// Re-exported so existing imports keep working; the single definitions live in constants.ts / dates.ts.
+export {
+  SINGLE_SESSION,
+  EXTRA_PAYMENT,
+  ATTEND_ONLY_TYPES,
+  SETTINGS_ID,
+  DEFAULT_PLACE,
+  OTHER_EXPENSE,
+  DEFAULT_EXPENSE_CATEGORIES,
+  DEFAULT_INACTIVE_DAYS,
+  DEFAULT_REMINDER_TEMPLATE,
+  DEFAULT_RECEIPT_TEMPLATE,
+} from './constants';
+export { localToday, diffDays, addDays, addOneMonth, formatDate } from './dates';
+
+// The old calculation always used 60 (kept fixed so past months never change).
 const LEGACY_GYM_RATE = 60;
 
-export const OTHER_EXPENSE = 'تانية';
-export const DEFAULT_EXPENSE_CATEGORIES = ['مواصلات', 'أدوات', 'إيجار', OTHER_EXPENSE];
-export const DEFAULT_INACTIVE_DAYS = 30;
-export const DEFAULT_REMINDER_TEMPLATE = [
-  'أهلاً {الاسم} 👋',
-  '{حالة_الاشتراك}',
-  '{سطر_الزيادة}',
-  'ياريت تجدد الاشتراك علشان نكمل 💪',
-].join('\n');
-export const DEFAULT_RECEIPT_TEMPLATE = [
-  'أهلاً {الاسم} ✅',
-  'تم استلام {المبلغ} ج ({نوع_الدفع}) يوم {تاريخ_الدفع}.',
-  '{صلاحية_الاشتراك}',
-  'شكراً 🙏',
-].join('\n');
-
 export const DEFAULT_SETTINGS: AppSettings = {
-  gymRates: [{ from: '2000-01-01', rate: 60 }],
-  discountThreshold: 1500,
-  discountTiers: [
-    { sessions: 8, cost: 800 },
-    { sessions: 12, cost: 900 },
-    { sessions: 16, cost: 1000 },
-    { sessions: 20, cost: 1100 },
-  ],
+  gymRates: [{ from: '2000-01-01', rate: DEFAULT_GYM_RATE }],
+  discountThreshold: DEFAULT_DISCOUNT_THRESHOLD,
+  discountTiers: DEFAULT_DISCOUNT_TIERS,
 };
-
-// ---------------------------------------------------------------------------
-// Dates (pure 'YYYY-MM-DD' strings, no time zone surprises)
-// ---------------------------------------------------------------------------
-
-export function localToday(): string {
-  const d = new Date();
-  const offset = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - offset).toISOString().split('T')[0];
-}
-
-function toUTC(dateStr: string): number {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return Date.UTC(y, (m || 1) - 1, d || 1);
-}
-
-function fromUTC(ms: number): string {
-  return new Date(ms).toISOString().split('T')[0];
-}
-
-/** Whole days from a to b (b - a). */
-export function diffDays(a: string, b: string): number {
-  return Math.round((toUTC(b) - toUTC(a)) / 86400000);
-}
-
-export function addDays(dateStr: string, days: number): string {
-  return fromUTC(toUTC(dateStr) + days * 86400000);
-}
-
-/** One calendar month later (JS overflow rule: Jan 31 -> Mar 3/2), computed in UTC. */
-export function addOneMonth(dateStr: string): string {
-  const d = new Date(toUTC(dateStr));
-  d.setUTCMonth(d.getUTCMonth() + 1);
-  return fromUTC(d.getTime());
-}
-
-export function formatDate(dateStr: string): string {
-  if (!dateStr) return '-';
-  const [y, m, d] = dateStr.split('-');
-  return `${d}/${m}/${y}`;
-}
 
 // ---------------------------------------------------------------------------
 // Packages & settings
@@ -433,7 +409,7 @@ export function computeMonthlyTotals(players: Player[], settings: AppSettings): 
 
   players.forEach(p => {
     if (p.isSystem) {
-      if (p.id !== 'sys_expenses') return;
+      if (p.id !== EXPENSES_ID) return;
       p.history?.forEach(h => {
         if (!h.date) return;
         const parts = h.date.split('-');

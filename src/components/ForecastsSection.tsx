@@ -25,7 +25,7 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
   players.forEach(p => {
     if (!p.isSystem) {
       p.history?.forEach(h => {
-        if (h.subType === 'حصة واحدة') {
+        if (h.subType === SINGLE_SESSION) {
           dailySessionRevenues[h.date] = (dailySessionRevenues[h.date] || 0) + (h.paid || 0);
           dailySessionCosts[h.date] = (dailySessionCosts[h.date] || 0) + (h.cost || 0);
           dailySessionCounts[h.date] = (dailySessionCounts[h.date] || 0) + 1;
@@ -104,7 +104,7 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
 
   // --- WEEKLY PROJECTION (الأسبوع) ---
   const expiringPlayersNext7 = players.filter(p => {
-    if (p.isSystem || p.isDeleted || !p.subType || p.subType === 'حصة واحدة') return false;
+    if (p.isSystem || p.isDeleted || !p.subType || p.subType === SINGLE_SESSION) return false;
     const exp = checkExpiration(p);
     if (exp.isExpired) {
       return exp.days <= 14; // Expired but within last 14 days
@@ -128,13 +128,13 @@ export const ForecastsSection: React.FC<ForecastsSectionProps> = ({
   const weeklyProfitForecast = weeklyRevForecast - weeklyCostForecast;
 
   const activeMonthlyMembersCount = players.filter(
-    p => !p.isSystem && !p.isDeleted && p.subType && p.subType !== 'حصة واحدة' && !checkExpiration(p).isExpired
+    p => !p.isSystem && !p.isDeleted && p.subType && p.subType !== SINGLE_SESSION && !checkExpiration(p).isExpired
   ).length;
   const weeklyPeopleForecast = Math.round(activeMonthlyMembersCount * 1.5 + avgDailySessionCount * 7);
 
   // --- MONTHLY PROJECTION (الشهر) ---
   const activeMonthlyMembers = players.filter(p => {
-    if (p.isSystem || p.isDeleted || !p.subType || p.subType === 'حصة واحدة') return false;
+    if (p.isSystem || p.isDeleted || !p.subType || p.subType === SINGLE_SESSION) return false;
     const exp = checkExpiration(p);
     // Include if not expired OR expired but within last 14 days
     return !exp.isExpired || exp.days <= 14;

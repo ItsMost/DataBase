@@ -1,73 +1,86 @@
-# React + TypeScript + Vite
+# Gym Solo — حسابات المدرب
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+تطبيق موبايل (PWA) للمدرب عشان يتابع حسابات اللاعيبة:
 
-Currently, two official plugins are available:
+- **القاعدة:** بيانات اللاعيبة (الاسم، والمواليد، والنادي، والمركز، والموبايل...).
+- **الاشتراكات:** الباقات ("بتخلص بالحصص" أو "بالشهر")، و"حصة واحدة"، والحضور، والحصص الزيادة، وفلوس الجيم/المكان.
+- **التنبيهات:** محتاج يجدد، وحضر زيادة وعليه فلوس، ومش نشط.
+- **التقارير:** شهرية (والشهر الحالي بيتقارن بنفس عدد الأيام من الشهر اللي قبله)، ويومية، والمحفظة، والمصروفات بأنواعها.
+- **الواتساب:** تذكير بالدفع وإيصال بعد الدفع، والنص بيتعدل من الإعدادات.
+- **بيشتغل من غير نت:** كل البيانات محفوظة على الموبايل (Dexie / IndexedDB)، وبتتزامن مع Supabase أول ما النت يرجع.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## التشغيل على جهازك
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+cp .env.example .env.local   # واملا القيم (شوف تحت)
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+| الأمر | بيعمل إيه |
+|---|---|
+| `npm run dev` | يشغّل التطبيق محليًا |
+| `npm test` | اختبارات الحسابات (Vitest) |
+| `npm run lint` | فحص الكود |
+| `npm run build` | نسخة الإنتاج + الـ service worker |
+| `npm run icons` | يعمل أيقونات الـ PWA من `public/favicon.svg` |
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## الـ Environment variables
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+| المتغير | منين |
+|---|---|
+| `VITE_SUPABASE_URL` | Supabase ← Project Settings ← API ← Project URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase ← Project Settings ← API ← `anon` `public` key |
+
+- **محليًا:** في ملف `.env.local` (مش بيترفع على GitHub).
+- **على Vercel:** Project ← Settings ← Environment Variables. ضيف الاتنين لـ Production و Preview، وبعدها اعمل Redeploy.
+- لو المتغيرات مش موجودة، الـ build **بيفشل برسالة واضحة**، فالنسخة الشغالة بتفضل زي ما هي.
+
+> ⚠️ مفتاح `anon` بيبان لأي حد بيفتح الموقع، وده طبيعي. اللي بيحمي البيانات هو **RLS** في Supabase
+> (`supabase/migrations/20261118000000_phase1_rls_and_backups.sql`). لازم يكون متنفّذ.
+
+## حساب المدرب
+
+الدخول بكود بس. وراه حساب Supabase Auth واحد، والكود هو الباسورد بتاعه:
+
+1. Supabase ← Authentication ← Users ← **Add user** ← Create new user.
+2. الإيميل: `coach@gym-solo.app` (مكتوب في `src/components/LoginScreen.tsx`).
+3. الباسورد: كود الدخول اللي تختاره (6 حروف أو أكتر).
+4. علّم **Auto Confirm User**.
+5. Authentication ← Sign In / Providers: اقفل **Allow new users to sign up**.
+
+علشان تغيّر الكود: غيّر باسورد الحساب ده من نفس المكان.
+
+## ترتيب الكود
+
 ```
+src/
+  lib/          الحسابات والتواريخ والثوابت (من غير React، وعليها اختبارات)
+    subscription.ts   دالة الانتهاء الموحدة + فلوس الجيم لكل حصة + الحصص الزيادة
+    reports.ts        التقارير الشهرية/اليومية + المقارنة العادلة
+    messages.ts       رسايل الواتساب
+    constants.ts      أنواع الاشتراكات، وأسماء الشهور، والقيم الافتراضية
+    dates.ts          التواريخ
+  services/     التخزين والمزامنة
+    db.ts             Dexie (البيانات على الموبايل)
+    supabaseClient.ts الاتصال بـ Supabase + الجلسة
+    sync.ts           طابور المزامنة + عدد اللي مستني + أخطاء المزامنة
+    backup.ts         النسخة الأسبوعية + نسخة قبل الاسترجاع
+    dailyCleanup.ts   التنضيف اليومي (مرة في اليوم)
+  hooks/        الـ state والعمليات
+    useAppData        تحميل البيانات + Realtime + التنضيف اليومي
+    usePlayers        اللاعيبة، والجروبات، والمصروفات، وقفل الشهر، وسلة المحذوفات
+    useSubscriptions  الدفع، والحصص الزيادة، والحضور، والمتوقع اليوم
+    useSettings / useWallet / useDataTools
+    useActiveSection / useProfileSection   منطق التابين الكبار
+  components/   الشاشات
+    subscriptions/    أجزاء تاب الاشتراكات
+    profile/          أجزاء البروفايل
+    modals/ layout/   النوافذ والأجزاء الجانبية
+tests/real-data.test.ts   بيقفل أرقام التقارير على داتا حقيقية (الداتا في tests/private ومش بتترفع)
+```
+
+## الاختبارات
+
+- `npm test` بيشغّل اختبارات الحسابات: بالحصص "15 من 12"، وبالشهر وفاضل حصص، وحصة واحدة، ودفع الزيادة بس، والتجديد المتأخر من غير تكرار فلوس الجيم، والباقات المخفضة، والمقارنة العادلة.
+- **أرقام الداتا الحقيقية:** حط export من جدول `players_sync` في `tests/private/real-players.json`. أول تشغيل بيحفظ الأرقام، وأي تغيير بعد كده الاختبار يفشل. الفولدر ده في `.gitignore`، لأن فيه أسماء وتليفونات وفلوس.

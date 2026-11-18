@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Real data snapshots for local tests (never commit: names, phones, money)
+tests/private/
+.claude/
