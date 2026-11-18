@@ -21,6 +21,22 @@ export const SETTINGS_ID = 'sys_settings';
 export const DEFAULT_PLACE = 'الجيم';
 const LEGACY_GYM_RATE = 60;
 
+export const OTHER_EXPENSE = 'تانية';
+export const DEFAULT_EXPENSE_CATEGORIES = ['مواصلات', 'أدوات', 'إيجار', OTHER_EXPENSE];
+export const DEFAULT_INACTIVE_DAYS = 30;
+export const DEFAULT_REMINDER_TEMPLATE = [
+  'أهلاً {الاسم} 👋',
+  '{حالة_الاشتراك}',
+  '{سطر_الزيادة}',
+  'ياريت تجدد الاشتراك علشان نكمل 💪',
+].join('\n');
+export const DEFAULT_RECEIPT_TEMPLATE = [
+  'أهلاً {الاسم} ✅',
+  'تم استلام {المبلغ} ج ({نوع_الدفع}) يوم {تاريخ_الدفع}.',
+  '{صلاحية_الاشتراك}',
+  'شكراً 🙏',
+].join('\n');
+
 export const DEFAULT_SETTINGS: AppSettings = {
   gymRates: [{ from: '2000-01-01', rate: 60 }],
   discountThreshold: 1500,
@@ -91,12 +107,24 @@ export function isPackageType(subType?: string): boolean {
 
 export function getSettings(players: Player[]): AppSettings {
   const rec = players.find(p => p.id === SETTINGS_ID)?.settings;
-  if (!rec) return DEFAULT_SETTINGS;
+  if (!rec) {
+    return {
+      ...DEFAULT_SETTINGS,
+      inactiveAfterDays: DEFAULT_INACTIVE_DAYS,
+      waReminderTemplate: DEFAULT_REMINDER_TEMPLATE,
+      waReceiptTemplate: DEFAULT_RECEIPT_TEMPLATE,
+      expenseCategories: DEFAULT_EXPENSE_CATEGORIES,
+    };
+  }
   return {
     gymRates: rec.gymRates && rec.gymRates.length > 0 ? rec.gymRates : DEFAULT_SETTINGS.gymRates,
     discountThreshold: rec.discountThreshold ?? DEFAULT_SETTINGS.discountThreshold,
     discountTiers: rec.discountTiers ?? DEFAULT_SETTINGS.discountTiers,
     v2From: rec.v2From,
+    inactiveAfterDays: rec.inactiveAfterDays ?? DEFAULT_INACTIVE_DAYS,
+    waReminderTemplate: rec.waReminderTemplate || DEFAULT_REMINDER_TEMPLATE,
+    waReceiptTemplate: rec.waReceiptTemplate || DEFAULT_RECEIPT_TEMPLATE,
+    expenseCategories: rec.expenseCategories && rec.expenseCategories.length > 0 ? rec.expenseCategories : DEFAULT_EXPENSE_CATEGORIES,
   };
 }
 

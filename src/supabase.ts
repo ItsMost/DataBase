@@ -651,3 +651,41 @@ export async function runWeeklyBackupIfDue(): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * One-off safety snapshot (e.g. right before an Import). Same JSON shape as the weekly backup.
+ * Tries the private Storage bucket; always returns the JSON so the caller can keep a local copy.
+ * Not counted in the weekly "keep last 8" rotation (different file name prefix).
+ */
+export async function uploadSafetySnapshot(label: string): Promise<{ uploaded: string | null; json: string }> {
+  const [players, expectedToday, personalWallet] = await Promise.all([
+    db.players.toArray(),
+    db.expectedToday.toArray(),
+    db.personalWallet.toArray(),
+  ]);
+  const now = new Date();
+  const json = JSON.stringify({
+    version: 1,
+    createdAt: now.toISOString(),
+    reason: label,
+    counts: { players: players.length, expectedToday: expectedToday.length, personalWallet: personalWallet.length },
+    players,
+    expectedToday,
+    personalWallet,
+  });
+  if (!navigator.onLine) return { uploaded: null, json };
+  try {
+    const name = `${label}-${now.toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+    const { error } = await supabase.storage
+      .from(BACKUP_BUCKET)
+      .upload(name, new Blob([json], { type: 'application/json' }), { contentType: 'application/json', upsert: false });
+    if (error) {
+      console.error('Safety snapshot: upload failed', error);
+      return { uploaded: null, json };
+    }
+    return { uploaded: name, json };
+  } catch (err) {
+    console.error('Safety snapshot: unexpected error', err);
+    return { uploaded: null, json };
+  }
+}
