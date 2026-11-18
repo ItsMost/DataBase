@@ -15,7 +15,10 @@ type GateState = 'checking' | 'in' | 'out';
  * Local Dexie data is never touched by login/logout.
  */
 export const AuthGate: React.FC = () => {
-  const [state, setState] = useState<GateState>('checking');
+  // A coach who logged in before on this phone gets the app at once, even with no internet.
+  // (Waiting for getSession() here would hang offline: with an expired token it keeps
+  // retrying the refresh. An invalid session still ends in SIGNED_OUT -> login screen.)
+  const [state, setState] = useState<GateState>(() => (hasStoredSession() ? 'in' : 'checking'));
 
   useEffect(() => {
     document.body.setAttribute('data-mode', localStorage.getItem('sys_mode') || 'dark');

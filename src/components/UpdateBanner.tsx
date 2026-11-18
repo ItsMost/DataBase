@@ -21,7 +21,12 @@ export const UpdateBanner: React.FC = () => {
       <span className="text-xs font-bold text-main">فيه تحديث جديد 🔄</span>
       <div className="flex gap-1">
         <button
-          onClick={() => updateServiceWorker(true)}
+          onClick={() => {
+            // Reload once the new version takes control (only after this tap).
+            // workbox alone skips the reload when the browser found the update by itself.
+            navigator.serviceWorker?.addEventListener('controllerchange', () => window.location.reload(), { once: true });
+            updateServiceWorker(true);
+          }}
           className="text-white text-xs font-black rounded-md px-3 py-1.5"
           style={{ backgroundColor: 'var(--primary)' }}
         >
