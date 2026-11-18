@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import App from '../App';
 import { LoginScreen } from './LoginScreen';
+import { UpdateBanner } from './UpdateBanner';
 import { supabase, hasStoredSession } from '../services/supabaseClient';
 import { processSyncQueue } from '../services/sync';
 
@@ -48,7 +49,10 @@ export const AuthGate: React.FC = () => {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  if (state === 'checking') return <div className="min-h-screen" />;
-  if (state === 'out') return <LoginScreen />;
-  return <App />;
+  return (
+    <>
+      <UpdateBanner />
+      {state === 'checking' ? <div className="min-h-screen" /> : state === 'out' ? <LoginScreen /> : <App />}
+    </>
+  );
 };
