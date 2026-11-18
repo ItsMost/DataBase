@@ -26,6 +26,7 @@ import {
 } from '../lib/subscription';
 import { SettingsPanel } from './SettingsPanel';
 import { computeFinancials, computeBreakdowns, fairMonthComparison, previousMonthKey } from '../lib/reports';
+import { MONTH_NAMES, EXPENSES_ID } from '../lib/constants';
 
 ChartJS.register(
   CategoryScale,
@@ -137,12 +138,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   // Daily transaction detail modal state
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
   const [excludeMonthlyDays, setExcludeMonthlyDays] = useState<{[dayKey: string]: boolean}>({});
-
-  // Month names in Arabic
-  const monthNames = [
-    'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-    'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-  ];
+  const monthNames = MONTH_NAMES;
 
   const financials = computeFinancials(players, settings);
 
@@ -156,7 +152,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   // --- Expenses lists computed for current month ---
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
-  const systemPlayer = players.find(p => p.id === 'sys_expenses');
+  const systemPlayer = players.find(p => p.id === EXPENSES_ID);
   const currentMonthExpenses = systemPlayer?.history
     ? systemPlayer.history
         .filter(h => {
@@ -298,7 +294,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
       // 1. Process payments (history entries) on this day:
       p.history?.forEach(h => {
         if (h.date === selectedDayKey) {
-          const isDailySession = h.subType === 'حصة واحدة';
+          const isDailySession = h.subType === SINGLE_SESSION;
           if (showOnlyDaily && !isDailySession) {
             return;
           }

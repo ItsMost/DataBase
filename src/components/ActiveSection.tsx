@@ -13,6 +13,7 @@ import {
 import { EndModePicker, GymCostField, PlaceField, usePlaceSuggestions } from './AccountingFields';
 import { buildReminderMessage, whatsAppLink } from '../lib/messages';
 import { diffDays, DEFAULT_INACTIVE_DAYS } from '../lib/subscription';
+import { PACKAGE_OPTIONS, SINGLE_SESSION_LABEL, ATTEND_ONLY_MONTHLY } from '../lib/constants';
 
 interface ActiveSectionProps {
   players: Player[];
@@ -74,14 +75,14 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   allGroups,
 }) => {
   // Subscription Form states
-  const [subType, setSubType] = useState('حصة واحدة');
+  const [subType, setSubType] = useState(SINGLE_SESSION);
   const [startDate, setStartDate] = useState(getTodayDate());
   const [paid, setPaid] = useState('');
   const settings = getSettings(players);
   const analysisOf = (p: Player) => analyzePlayer(p, settings);
   const placeSuggestions = usePlaceSuggestions(players, expectedAttendees);
 
-  const [cost, setCost] = useState(() => suggestGymCost(settings, 'حصة واحدة', 0));
+  const [cost, setCost] = useState(() => suggestGymCost(settings, SINGLE_SESSION, 0));
   const [costTouched, setCostTouched] = useState(false); // coach typed the gym money himself
   const [endMode, setEndMode] = useState<EndMode>('sessions');
   const [place, setPlace] = useState(DEFAULT_PLACE);
@@ -116,9 +117,9 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   const [showDailyArchive, setShowDailyArchive] = useState(false);
   const [expGroup, setExpGroup] = useState('');
   const [expPaid, setExpPaid] = useState('');
-  const [expSubType, setExpSubType] = useState('حصة واحدة');
+  const [expSubType, setExpSubType] = useState(SINGLE_SESSION);
   const [expTime, setExpTime] = useState('');
-  const [expCost, setExpCost] = useState(() => suggestGymCost(settings, 'حصة واحدة', 0));
+  const [expCost, setExpCost] = useState(() => suggestGymCost(settings, SINGLE_SESSION, 0));
   const [expCostTouched, setExpCostTouched] = useState(false);
   const [expEndMode, setExpEndMode] = useState<EndMode>('sessions');
   const [expPlace, setExpPlace] = useState(DEFAULT_PLACE);
@@ -190,7 +191,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
         // Just standard "+ دفع" from roster card
         setStartDate(getTodayDate());
         setPaid('');
-        setSubType('حصة واحدة');
+        setSubType(SINGLE_SESSION);
       }
     }
   }, [selectedPlayerId, editingMode]);
@@ -215,7 +216,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     // Reset Form
     setSelectedPlayerId('');
     setPaid('');
-    setSubType('حصة واحدة');
+    setSubType(SINGLE_SESSION);
     setEditingMode(null);
     setCostTouched(false);
     setEndMode('sessions');
@@ -307,8 +308,8 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     return matchesSearch && matchesGroup && matchesDate;
   });
 
-  const monthlySubscribers = filteredSubscribers.filter(p => p.subType && p.subType !== 'حصة واحدة');
-  const dailySubscribers = filteredSubscribers.filter(p => p.subType === 'حصة واحدة');
+  const monthlySubscribers = filteredSubscribers.filter(p => p.subType && p.subType !== SINGLE_SESSION);
+  const dailySubscribers = filteredSubscribers.filter(p => p.subType === SINGLE_SESSION);
 
   // Subscription alerts, split in three groups (shared engine, no money logic here)
   const inactiveAfterDays = settings.inactiveAfterDays ?? DEFAULT_INACTIVE_DAYS;
@@ -670,11 +671,11 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                 if (match) {
                   setSelectedExpPlayerId(match.id);
                   setExpGroup(match.sport || 'العام');
-                  if (match.subType && match.subType !== 'حصة واحدة') {
-                    setExpSubType('حضور فقط (مشترك شهرياً)');
+                  if (match.subType && match.subType !== SINGLE_SESSION) {
+                    setExpSubType(ATTEND_ONLY_MONTHLY);
                     setExpPaid('');
                   } else {
-                    setExpSubType('حصة واحدة');
+                    setExpSubType(SINGLE_SESSION);
                   }
                 } else {
                   setSelectedExpPlayerId('');
@@ -700,11 +701,11 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                         setExpName(p.name);
                         setSelectedExpPlayerId(p.id);
                         setExpGroup(p.sport || 'العام');
-                        if (p.subType && p.subType !== 'حصة واحدة') {
-                          setExpSubType('حضور فقط (مشترك شهرياً)');
+                        if (p.subType && p.subType !== SINGLE_SESSION) {
+                          setExpSubType(ATTEND_ONLY_MONTHLY);
                           setExpPaid('');
                         } else {
-                          setExpSubType('حصة واحدة');
+                          setExpSubType(SINGLE_SESSION);
                         }
                         setShowExpDropdown(false);
                       }}
@@ -746,13 +747,11 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
               onChange={(e) => setExpSubType(e.target.value)}
               className="w-full input-bg rounded-md px-3 py-2 text-sm border border-theme"
             >
-              <option value="حضور فقط (مشترك شهرياً)">حضور فقط (مشترك شهرياً)</option>
-              <option value="حصة واحدة">حصة واحدة (دفع يومي)</option>
-              <option value="8 حصص">8 حصص في الشهر</option>
-              <option value="10 حصص">10 حصص في الشهر</option>
-              <option value="12 حصة">12 حصة في الشهر</option>
-              <option value="16 حصة">16 حصة في الشهر</option>
-              <option value="20 حصة">20 حصة في الشهر</option>
+              <option value={ATTEND_ONLY_MONTHLY}>{ATTEND_ONLY_MONTHLY}</option>
+              <option value={SINGLE_SESSION}>{SINGLE_SESSION_LABEL}</option>
+              {PACKAGE_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
           </div>
 
@@ -860,13 +859,11 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                             onChange={(e) => setEditingExpSubType(e.target.value)}
                             className="w-full input-bg rounded px-2 py-1 border border-theme text-xs"
                           >
-                            <option value="حضور فقط (مشترك شهرياً)">حضور فقط (مشترك شهرياً)</option>
-                            <option value="حصة واحدة">حصة واحدة (دفع يومي)</option>
-                            <option value="8 حصص">8 حصص في الشهر</option>
-                            <option value="10 حصص">10 حصص في الشهر</option>
-                            <option value="12 حصة">12 حصة في الشهر</option>
-                            <option value="16 حصة">16 حصة في الشهر</option>
-                            <option value="20 حصة">20 حصة في الشهر</option>
+                            <option value={ATTEND_ONLY_MONTHLY}>{ATTEND_ONLY_MONTHLY}</option>
+                            <option value={SINGLE_SESSION}>{SINGLE_SESSION_LABEL}</option>
+                            {PACKAGE_OPTIONS.map(o => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
                           </select>
                         </div>
                         <div>
@@ -971,7 +968,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
                             setEditingExpTime(att.time || '');
                             setEditingExpGroup(att.sport || '');
                             setEditingExpPaid(String(att.paid || 0));
-                            setEditingExpSubType(att.subType || 'حصة واحدة');
+                            setEditingExpSubType(att.subType || SINGLE_SESSION);
                             setEditingExpCost(typeof att.cost === 'number' ? String(att.cost) : '');
                           }}
                           className="w-1/3 bg-primary/20 text-primary-light text-[10px] font-bold py-1.5 rounded hover:bg-primary hover:text-white active:scale-95 transition-all border border-primary/30"
@@ -1071,12 +1068,10 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
             onChange={(e) => setSubType(e.target.value)}
             className="w-full input-bg rounded-md px-4 py-3"
           >
-            <option value="حصة واحدة">حصة واحدة (دفع يومي)</option>
-            <option value="8 حصص">8 حصص في الشهر</option>
-            <option value="10 حصص">10 حصص في الشهر</option>
-            <option value="12 حصة">12 حصة في الشهر</option>
-            <option value="16 حصة">16 حصة في الشهر</option>
-            <option value="20 حصة">20 حصة في الشهر</option>
+            <option value={SINGLE_SESSION}>{SINGLE_SESSION_LABEL}</option>
+            {PACKAGE_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
 
           {isPackageType(subType) && (
@@ -1157,7 +1152,7 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {filteredAttendedToday.map(player => {
               const sessionText = getTodaySessionNumberText(player);
-              const isMonthly = player.subType && player.subType !== 'حصة واحدة';
+              const isMonthly = player.subType && player.subType !== SINGLE_SESSION;
               return (
                 <div
                   key={player.id}

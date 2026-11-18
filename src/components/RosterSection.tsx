@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { Player } from '../types';
 import { getSettings, analyzePlayer } from '../lib/subscription';
 import { buildReminderMessage, whatsAppLink } from '../lib/messages';
+import { currentMonthKey } from '../lib/dates';
 
 interface RosterSectionProps {
   players: Player[];
@@ -34,14 +35,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
   onPayExtras,
   allGroups,
 }) => {
-  // Get today's local year and month in YYYY-MM format
-  const currentMonthPrefix = (() => {
-    const d = new Date();
-    const offset = d.getTimezoneOffset() * 60000;
-    const localDateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
-    const parts = localDateStr.split('-');
-    return `${parts[0]}-${parts[1]}`;
-  })();
+  const currentMonthPrefix = currentMonthKey(); // 'YYYY-MM'
 
   // Form states
   const [name, setName] = useState('');

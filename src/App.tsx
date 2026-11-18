@@ -27,7 +27,6 @@ import {
 } from './supabase';
 import { buildReceiptMessage, whatsAppLink, type ReceiptInfo } from './lib/messages';
 
-const MONTH_LOCKS_ID = 'sys_month_locks';
 import type { Player, HistoryEntry, ExpectedAttendee, PersonalWalletEntry, AppSettings, EndMode } from './types';
 import {
   SETTINGS_ID,
@@ -42,6 +41,8 @@ import {
   isPackageType,
   packageStart,
 } from './lib/subscription';
+import { MONTH_NAMES, EXPENSES_ID, GROUPS_CONFIG_ID, MONTH_LOCKS_ID, ATTEND_ONLY_MONTHLY } from './lib/constants';
+import { localToday, dateKey } from './lib/dates';
 
 interface SidebarWidgetProps {
   currentProfit: number;
@@ -297,7 +298,7 @@ export const App: React.FC = () => {
       const cleanPlayers = await db.players.toArray();
       let playersUpdated = false;
       const cleanedPlayers = cleanPlayers.map(p => {
-        if (p.subType === 'حصة واحدة' && p.startDate && p.startDate < todayStr) {
+        if (p.subType === SINGLE_SESSION && p.startDate && p.startDate < todayStr) {
           playersUpdated = true;
           return {
             ...p,
@@ -373,7 +374,7 @@ export const App: React.FC = () => {
       // Auto-wipe expired single-session subscriptions (yesterday's "حصة واحدة" players)
       let playersUpdated = false;
       const cleanedPlayers = cleanPlayers.map(p => {
-        if (p.subType === 'حصة واحدة' && p.startDate && p.startDate < todayStr) {
+        if (p.subType === SINGLE_SESSION && p.startDate && p.startDate < todayStr) {
           playersUpdated = true;
           return {
             ...p,
@@ -393,12 +394,12 @@ export const App: React.FC = () => {
 
       // Seed group configs from existing database players if sys_groups_config doesn't exist or is empty
       const latestPlayers = await db.players.toArray();
-      const sysGroups = latestPlayers.find(p => p.id === 'sys_groups_config');
+      const sysGroups = latestPlayers.find(p => p.id === GROUPS_CONFIG_ID);
       if (!sysGroups || !sysGroups.history || sysGroups.history.length === 0) {
         const uniqueSports = [...new Set(latestPlayers.filter(p => !p.isSystem && p.sport && p.sport !== 'العام' && p.sport !== 'General').map(p => p.sport!))];
         if (uniqueSports.length > 0) {
           const newSysGroups = {
-            id: 'sys_groups_config',
+            id: GROUPS_CONFIG_ID,
             isSystem: true,
             name: 'إعدادات الجروبات',
             history: uniqueSports.map((sport, index) => ({
@@ -424,12 +425,12 @@ export const App: React.FC = () => {
           if (syncedPlayers.length > 0) {
             setPlayers(syncedPlayers);
             // Also seed groups from synced players
-            const sysGroupsSynced = syncedPlayers.find(p => p.id === 'sys_groups_config');
+            const sysGroupsSynced = syncedPlayers.find(p => p.id === GROUPS_CONFIG_ID);
             if (!sysGroupsSynced || !sysGroupsSynced.history || sysGroupsSynced.history.length === 0) {
               const uniqueSports = [...new Set(syncedPlayers.filter(p => !p.isSystem && p.sport && p.sport !== 'العام' && p.sport !== 'General').map(p => p.sport!))];
               if (uniqueSports.length > 0) {
                 const newSysGroups = {
-                  id: 'sys_groups_config',
+                  id: GROUPS_CONFIG_ID,
                   isSystem: true,
                   name: 'إعدادات الجروبات',
                   history: uniqueSports.map((sport, index) => ({
@@ -582,17 +583,9 @@ export const App: React.FC = () => {
     }, 3000);
   };
 
-  const getTodayDate = () => {
-    const d = new Date();
-    const offset = d.getTimezoneOffset() * 60000;
-    return new Date(d.getTime() - offset).toISOString().split('T')[0];
-  };
+  const getTodayDate = localToday;
 
-  const getFormattedDate = (year: number, month: number, day: number) => {
-    const d = new Date(year, month, day);
-    const offset = d.getTimezoneOffset() * 60000;
-    return new Date(d.getTime() - offset).toISOString().split('T')[0];
-  };
+  const getFormattedDate = dateKey;
 
   // One expiry/status function for every tab (src/lib/subscription.ts)
   const appSettings = getSettings(players);
@@ -663,9 +656,9 @@ export const App: React.FC = () => {
 
   // Group configurations handlers
   const handleSaveGroupConfig = async (name: string) => {
-    let sys = await db.players.get('sys_groups_config');
+    let sys = await db.players.get(GROUPS_CONFIG_ID);
     if (!sys) {
-      sys = { id: 'sys_groups_config', isSystem: true, name: 'إعدادات الجروبات', history: [] };
+      sys = { id: GROUPS_CONFIG_ID, isSystem: true, name: 'إعدادات الجروبات', history: [] };
     }
 
     const history = sys.history ? [...sys.history] : [];
@@ -690,7 +683,7 @@ export const App: React.FC = () => {
 
   const handleDeleteGroupConfig = async (name: string) => {
     // 1. Delete group configuration
-    const sys = await db.players.get('sys_groups_config');
+    const sys = await db.players.get(GROUPS_CONFIG_ID);
     if (!sys || !sys.history) return;
 
     const history = sys.history.filter(h => h.desc !== name);
@@ -772,7 +765,7 @@ export const App: React.FC = () => {
     if (!newName.trim() || oldName === newName) return;
 
     // 1. Update config
-    const sys = await db.players.get('sys_groups_config');
+    const sys = await db.players.get(GROUPS_CONFIG_ID);
     if (!sys || !sys.history) return;
 
     const history = sys.history.map(h => {
@@ -1090,9 +1083,9 @@ export const App: React.FC = () => {
 
   // Expenses management
   const handleSaveExpense = async (desc: string, cost: number, date: string, category?: string) => {
-    let sys = await db.players.get('sys_expenses');
+    let sys = await db.players.get(EXPENSES_ID);
     if (!sys) {
-      sys = { id: 'sys_expenses', isSystem: true, name: 'المصروفات العامة', history: [] };
+      sys = { id: EXPENSES_ID, isSystem: true, name: 'المصروفات العامة', history: [] };
     }
 
     const newExpense: HistoryEntry = {
@@ -1117,7 +1110,7 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteExpense = async (timestamp: number) => {
-    const sys = await db.players.get('sys_expenses');
+    const sys = await db.players.get(EXPENSES_ID);
     if (!sys || !sys.history) return;
 
     const history = sys.history.filter(h => h.timestamp !== timestamp);
@@ -1171,7 +1164,7 @@ export const App: React.FC = () => {
     }
 
     // 3. Revert attendance if it was a single session transaction
-    if (deletedEntry?.subType === 'حصة واحدة') {
+    if (deletedEntry?.subType === SINGLE_SESSION) {
       attendance = attendance.filter(date => date !== deletedEntry.date);
     }
 
@@ -1309,7 +1302,7 @@ export const App: React.FC = () => {
     setPlayers(updatedPlayers);
     setExpectedAttendees(updatedExpected);
     triggerToast(
-      attendee.subType === 'حضور فقط (مشترك شهرياً)' || attendee.subType === 'حضور فقط'
+      attendee.subType === ATTEND_ONLY_MONTHLY || attendee.subType === 'حضور فقط'
         ? `تم تسجيل حضور اللاعب [${attendee.name}] اليوم بنجاح 🟢`
         : `تم تسجيل الحضور وتفعيل الاشتراك للاعب [${attendee.name}] ✅`
     );
@@ -1586,11 +1579,7 @@ export const App: React.FC = () => {
       expenses: m.expenses,
     };
   };
-
-  const monthNames = [
-    'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-    'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-  ];
+  const monthNames = MONTH_NAMES;
   const monthBenefit = getCurrentMonthBenefit();
   const currentMonthLabel = monthNames[new Date().getMonth()];
 
@@ -1678,7 +1667,7 @@ export const App: React.FC = () => {
   const currentGroups = players.filter(p => !p.isSystem && !p.isDeleted).map(p => p.sport || 'العام');
 
   // Load groups configurations
-  const groupsConfigPlayer = players.find(p => p.id === 'sys_groups_config');
+  const groupsConfigPlayer = players.find(p => p.id === GROUPS_CONFIG_ID);
   const groupsConfig = groupsConfigPlayer?.history || [];
   const configuredGroups = groupsConfig.map(h => h.desc);
 
