@@ -6,10 +6,13 @@ import { GroupsSection } from './components/GroupsSection';
 import { ProfileSection } from './components/ProfileSection';
 import { ForecastsSection } from './components/ForecastsSection';
 import { DuplicateNamesAlert } from './components/DuplicateNamesAlert';
+import { SidebarWidget, ExpectedSidebarWidget } from './components/layout/SidebarWidgets';
+import { HistoryModal } from './components/modals/HistoryModal';
+import { AppModals } from './components/modals/AppModals';
 import { supabase } from './services/supabaseClient';
-import { buildReceiptMessage, whatsAppLink, type ReceiptInfo } from './lib/messages';
+import { type ReceiptInfo } from './lib/messages';
 
-import type { Player, ExpectedAttendee } from './types';
+import type { Player } from './types';
 import { getSettings, analyzePlayer, computeMonthlyTotals } from './lib/subscription';
 import { MONTH_NAMES, GROUPS_CONFIG_ID, MONTH_LOCKS_ID } from './lib/constants';
 import { localToday, dateKey } from './lib/dates';
@@ -20,182 +23,6 @@ import { useSubscriptions } from './hooks/useSubscriptions';
 import { useSettings } from './hooks/useSettings';
 import { useWallet } from './hooks/useWallet';
 import { useDataTools } from './hooks/useDataTools';
-
-interface SidebarWidgetProps {
-  currentProfit: number;
-  highestProfit: number;
-  highestMonthLabel: string;
-  currentMonthLabel: string;
-}
-
-const SidebarWidget: React.FC<SidebarWidgetProps> = ({
-  currentProfit,
-  highestProfit,
-  highestMonthLabel,
-  currentMonthLabel
-}) => {
-  const target = highestProfit <= 0 ? 5000 : highestProfit;
-  const pct = (currentProfit / target) * 100;
-  const clampedPct = Math.min(100, Math.max(0, pct));
-  const isRecordBroken = currentProfit > highestProfit && highestProfit > 0;
-
-  let levelLabel = 'قليل ⚠️';
-  let levelBadgeClass = 'bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50';
-  let meterGradient = 'from-rose-500 to-orange-500';
-
-  if (isRecordBroken) {
-    levelLabel = 'رقم قياسي جديد! 🎉';
-    levelBadgeClass = 'bg-orange-50 dark:bg-orange-950/20 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-900/50 animate-pulse';
-    meterGradient = 'from-orange-500 via-amber-400 to-yellow-300 animate-pulse';
-  } else if (pct >= 80) {
-    levelLabel = 'ممتاز 🏆';
-    levelBadgeClass = 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/50';
-    meterGradient = 'from-orange-500 to-emerald-500';
-  } else if (pct >= 40) {
-    levelLabel = 'متوسط ⚡';
-    levelBadgeClass = 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50';
-    meterGradient = 'from-orange-500 to-amber-500';
-  }
-
-  return (
-    <div className={`card-bg rounded-2xl p-5 border border-theme transition-all duration-500 flex flex-col justify-between select-none ${isRecordBroken ? 'record-breaker-glow' : 'shadow-sm'}`}>
-      <div className="text-center border-b border-theme/30 pb-3 mb-4">
-        <h4 className="text-base font-black text-primary flex items-center justify-center gap-2 glow-text">
-          <span>📊 مقياس الأداء المالي</span>
-        </h4>
-        <p className="text-[10px] text-muted mt-1 font-bold">مقارنة أرباح الشهر الحالي بأعلى شهر تاريخي</p>
-      </div>
-
-      <div className="flex gap-4 items-center justify-center mb-6">
-        {/* Thermometer / Vertical bar meter */}
-        <div className="relative flex flex-col items-center">
-          <div className="text-[10px] text-muted font-bold mb-1">100%</div>
-          <div className="w-6 bg-slate-100 dark:bg-slate-900/60 rounded-full h-48 border border-slate-200 dark:border-slate-800 relative flex flex-col justify-end overflow-hidden shadow-inner">
-            <div 
-              style={{ height: `${clampedPct}%` }}
-              className={`w-full rounded-b-full bg-gradient-to-t ${meterGradient} transition-all duration-1000 ease-out`}
-            />
-            {/* Markers */}
-            <div className="absolute bottom-[40%] left-0 right-0 border-t border-dashed border-slate-300 dark:border-slate-700/60 z-10" title="40% - متوسط" />
-            <div className="absolute bottom-[80%] left-0 right-0 border-t border-dashed border-slate-300 dark:border-slate-700/60 z-10" title="80% - ممتاز" />
-          </div>
-          <div className="text-[10px] text-muted font-bold mt-1">0%</div>
-        </div>
-
-        {/* Text Details & Indicators */}
-        <div className="flex-1 flex flex-col justify-center space-y-4">
-          <div>
-            <span className="text-[11px] text-muted block font-extrabold mb-0.5">أرباح ({currentMonthLabel})</span>
-            <span className="text-2xl font-black text-main text-contrast-bold">
-              {currentProfit} <span className="text-xs font-normal">ج.م</span>
-            </span>
-          </div>
-
-          <div>
-            <span className="text-[11px] text-muted block font-extrabold mb-0.5">الهدف (أعلى شهر)</span>
-            <span className="text-lg font-black text-primary-light text-contrast-bold">
-              {highestProfit > 0 ? highestProfit : '5000'} <span className="text-xs font-normal">ج.م</span>
-            </span>
-            {highestProfit > 0 && (
-              <span className="text-[9px] text-muted block font-extrabold">({highestMonthLabel})</span>
-            )}
-          </div>
-
-          <div>
-            <span className="text-[11px] text-muted block font-extrabold mb-1">مستوى الأداء</span>
-            <span className={`px-2.5 py-0.5 rounded-full text-xs font-black inline-block ${levelBadgeClass}`}>
-              {levelLabel}
-            </span>
-          </div>
-          
-          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-2.5 border border-slate-200 dark:border-slate-800/80 text-center shadow-inner">
-            <span className="text-[10px] text-muted block font-extrabold">النسبة المحققة</span>
-            <span className="text-base font-black text-primary glow-text">
-              {pct.toFixed(1)}%
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Helper descriptive text */}
-      <div className="border-t border-theme/30 pt-3 text-center">
-        {isRecordBroken ? (
-          <div className="text-xs font-bold text-orange-500 animate-bounce">
-            🎉 رائع! تم كسر الرقم القياسي السابق بزيادة <span className="underline">{currentProfit - highestProfit} ج.م</span>!
-          </div>
-        ) : (
-          <div className="text-[11px] text-muted font-extrabold">
-            متبقي <span className="text-primary font-black text-contrast-bold">{target - currentProfit} ج.م</span> لكسر الرقم القياسي
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const formatTimeTo12Hr = (timeStr: string) => {
-  if (!timeStr) return '--:--';
-  const parts = timeStr.split(':');
-  if (parts.length < 2) return timeStr;
-  let hrs = parseInt(parts[0], 10);
-  const mins = parts[1];
-  if (isNaN(hrs)) return timeStr;
-  
-  const ampm = hrs >= 12 ? 'م' : 'ص';
-  hrs = hrs % 12;
-  if (hrs === 0) hrs = 12;
-  
-  return `${hrs}:${mins} ${ampm}`;
-};
-
-interface ExpectedSidebarWidgetProps {
-  expectedAttendees: ExpectedAttendee[];
-}
-
-const ExpectedSidebarWidget: React.FC<ExpectedSidebarWidgetProps> = ({
-  expectedAttendees
-}) => {
-  const activeAttendees = expectedAttendees.filter(att => !att.isDeleted);
-  // Sort attendees chronologically by time
-  const sortedAttendees = [...activeAttendees].sort((a, b) => {
-    return (a.time || '').localeCompare(b.time || '');
-  });
-
-  return (
-    <div className="card-bg rounded-2xl p-4 border border-theme shadow-sm flex flex-col select-none">
-      <div className="flex justify-between items-center border-b border-theme/30 pb-2.5 mb-3">
-        <h4 className="text-sm font-black text-primary flex items-center gap-1.5 glow-text">
-          <span>📋 الحضور المتوقع اليوم</span>
-        </h4>
-        <span className="bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5 rounded-full">
-          {activeAttendees.length}
-        </span>
-      </div>
-
-      {sortedAttendees.length === 0 ? (
-        <div className="text-center text-xs text-muted py-6 font-bold">
-          لا يوجد لاعبين متوقعين اليوم بعد 📋
-        </div>
-      ) : (
-        <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
-          {sortedAttendees.map((att) => (
-            <div 
-              key={att.id} 
-              className="flex justify-between items-center py-2 px-2.5 rounded-xl bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800/80 hover:border-primary/20 hover:bg-primary-glow/5 transition-all"
-            >
-              <span className="text-xs font-bold text-main truncate max-w-[120px]" title={att.name}>
-                {att.name}
-              </span>
-              <span className="text-[10px] font-black text-primary bg-primary-glow px-2 py-0.5 rounded-md border border-primary/10 flex items-center gap-1 whitespace-nowrap">
-                🕒 {formatTimeTo12Hr(att.time)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
 
 export const App: React.FC = () => {
   // Global View states
@@ -383,45 +210,6 @@ export const App: React.FC = () => {
   };
 
   const highestStats = getHighestMonthStats();
-
-  const getCalendarDays = () => {
-    if (!historyPlayerId) return [];
-    const p = players.find(x => x.id === historyPlayerId);
-    if (!p) return [];
-
-    const year = calCurrentDate.getFullYear();
-    const month = calCurrentDate.getMonth();
-    
-    const firstDay = new Date(year, month, 1).getDay();
-    const lastDate = new Date(year, month + 1, 0).getDate();
-
-    const cells = [];
-    // Padding for empty days at start of month
-    for (let i = 0; i < firstDay; i++) {
-      cells.push(<div key={`empty-${i}`}></div>);
-    }
-
-    const attendanceSet = new Set(p.attendance || []);
-    for (let i = 1; i <= lastDate; i++) {
-      const formattedDate = getFormattedDate(year, month, i);
-      const isAttended = attendanceSet.has(formattedDate);
-      const dayClass = isAttended
-        ? "cal-attended hover:opacity-80 cursor-pointer"
-        : "cal-empty input-bg border border-theme hover:bg-primary-glow/20 cursor-pointer transition-all";
-
-      cells.push(
-        <div
-          key={i}
-          className={`cal-day ${dayClass}`}
-          onClick={() => handleToggleCalendarDay(historyPlayerId, formattedDate)}
-          title="اضغط لتسجيل/إلغاء الحضور"
-        >
-          {i}
-        </div>
-      );
-    }
-    return cells;
-  };
 
   const historyPlayer = players.find(x => x.id === historyPlayerId);
 
@@ -744,315 +532,45 @@ export const App: React.FC = () => {
 
       {/* --- Overlay Modals --- */}
 
-      {/* A. Global History Modal (Reversing history array exactly like native openHistory) */}
+      {/* A. Player history (payments + attendance calendar) */}
       {historyPlayerId && historyPlayer && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-5 w-full max-w-lg relative h-[85vh] flex flex-col border border-theme">
-            <button
-              onClick={() => setHistoryPlayerId(null)}
-              className="absolute top-4 left-4 text-muted hover:text-main input-bg p-1 rounded-full border border-theme"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </button>
-            <h3 className="text-xl font-bold text-primary mb-1 glow-text">سجل اللاعب</h3>
-            <p className="text-primary-light mb-4 text-sm font-bold">
-              [#{historyPlayer.number}] {historyPlayer.name}
-            </p>
-            
-            <div className="flex border-b border-theme mb-4">
-              <button
-                onClick={() => setHistoryTab('payments')}
-                className={`w-1/2 py-2 text-center text-sm font-bold transition-all rounded-t-lg ${
-                  historyTab === 'payments' ? 'tab-active' : 'tab-inactive'
-                }`}
-              >
-                المدفوعات
-              </button>
-              <button
-                onClick={() => setHistoryTab('calendar')}
-                className={`w-1/2 py-2 text-center text-sm font-bold transition-all rounded-t-lg ${
-                  historyTab === 'calendar' ? 'tab-active' : 'tab-inactive'
-                }`}
-              >
-                أيام الحضور 📅
-              </button>
-            </div>
-
-            {/* Payments Sub tab logs */}
-            {historyTab === 'payments' && (
-              <div className="overflow-y-auto pr-1 flex-1 space-y-3 block">
-                {!historyPlayer.history || historyPlayer.history.length === 0 ? (
-                  <div className="text-center text-muted py-6 border border-dashed border-theme rounded-lg">
-                    لا يوجد سجل مدفوعات سابق للاعب.
-                  </div>
-                ) : (
-                  [...historyPlayer.history].reverse().map(h => (
-                    <div
-                      key={h.timestamp}
-                      className="input-bg rounded-lg p-3 text-right shadow-sm border border-theme relative mb-3"
-                    >
-                      <button
-                        onClick={() => handleDeleteHistoryEntry(historyPlayer.id, h.timestamp)}
-                        className="absolute top-3 left-3 text-danger hover:text-red-400 bg-danger/10 px-2 py-1 rounded text-xs transition-all border border-danger/20"
-                      >
-                        مسح 🗑️
-                      </button>
-                      <div className="flex justify-between items-center border-b border-theme pb-2 mb-2 pr-16">
-                        <span className="text-primary font-bold bg-primary-glow px-2 py-1 rounded text-xs">
-                          {h.subType}
-                        </span>
-                        <span className="text-muted text-xs flex items-center gap-1">
-                          🕒 {new Date(h.date).toLocaleDateString('en-GB')}
-                        </span>
-                      </div>
-                      
-                      <div className="flex justify-between text-sm px-1">
-                        <div>
-                          <span className="text-muted text-xs block mb-1">المبلغ</span>
-                          <span className="text-success font-bold">{h.paid} ج</span>
-                        </div>
-                        <div>
-                          <span className="text-muted text-xs block mb-1">الجيم</span>
-                          <span className="text-danger font-bold">{h.cost} ج</span>
-                        </div>
-                        <div>
-                          <span className="text-muted text-xs block mb-1">الربح</span>
-                          <span className="text-primary font-bold glow-text">{(h.paid || 0) - (h.cost || 0)} ج</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Calendar attendance tracker sub tab */}
-            {historyTab === 'calendar' && (
-              <div className="overflow-y-auto pr-1 flex-1">
-                <div className="input-bg rounded-lg p-4 border border-theme">
-                  <div className="text-center text-[10px] text-primary mb-3 glow-text font-bold">
-                    💡 اضغط على أي يوم لتسجيل أو إلغاء الحضور للّاعب
-                  </div>
-                  <div className="flex justify-between items-center mb-4">
-                    <button
-                      onClick={() => {
-                        const newD = new Date(calCurrentDate);
-                        newD.setMonth(newD.getMonth() - 1);
-                        setCalCurrentDate(newD);
-                      }}
-                      className="text-primary hover:text-primary-light bg-transparent px-3 py-1 rounded border border-theme"
-                    >
-                      ◀
-                    </button>
-                    <span className="text-primary-light font-bold text-base glow-text">
-                      {calCurrentDate.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })}
-                    </span>
-                    <button
-                      onClick={() => {
-                        const newD = new Date(calCurrentDate);
-                        newD.setMonth(newD.getMonth() + 1);
-                        setCalCurrentDate(newD);
-                      }}
-                      className="text-primary hover:text-primary-light bg-transparent px-3 py-1 rounded border border-theme"
-                    >
-                      ▶
-                    </button>
-                  </div>
-                  
-                  <div className="grid grid-cols-7 gap-1 text-center text-xs text-muted mb-2 font-bold">
-                    <div>أحد</div><div>إثنين</div><div>ثلاثاء</div><div>أربعاء</div><div>خميس</div><div>جمعة</div><div>سبت</div>
-                  </div>
-                  
-                  <div className="grid grid-cols-7 gap-1 text-center">
-                    {getCalendarDays()}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <HistoryModal
+          historyPlayer={historyPlayer}
+          historyTab={historyTab}
+          setHistoryTab={setHistoryTab}
+          calCurrentDate={calCurrentDate}
+          setCalCurrentDate={setCalCurrentDate}
+          setHistoryPlayerId={setHistoryPlayerId}
+          handleDeleteHistoryEntry={handleDeleteHistoryEntry}
+          handleToggleCalendarDay={handleToggleCalendarDay}
+        />
       )}
 
-      {/* B. Player Delete Confirmation Modal */}
-      {playerToDeleteId && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-6 w-full max-w-sm text-center border border-theme">
-            <h3 className="text-xl font-bold text-danger mb-2">تحذير النظام!</h3>
-            <p className="text-main mb-6">هل أنت متأكد من حذف هذا اللاعب تماماً من القاعدة؟</p>
-            <div className="flex gap-3">
-              <button
-                onClick={handleDeletePlayer}
-                className="w-1/2 bg-danger text-danger border border-danger font-bold rounded-md px-4 py-2"
-              >
-                تأكيد
-              </button>
-              <button
-                onClick={() => setPlayerToDeleteId(null)}
-                className="w-1/2 input-bg font-bold rounded-md px-4 py-2"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* D. Backup/Export JSON Code Modal */}
-      {showBackupModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-5 w-full max-w-sm relative flex flex-col border border-theme">
-            <button
-              onClick={() => setShowBackupModal(false)}
-              className="absolute top-4 left-4 text-muted hover:text-main input-bg p-1 rounded-full border border-theme"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </button>
-            <h3 className="text-lg font-bold text-blue-500 mb-2">حفظ النسخة الاحتياطية</h3>
-            <p className="text-xs text-muted mb-4">يفضل استخدام (تنزيل ملف) والاحتفاظ به لحماية بياناتك بالكامل.</p>
-            <textarea
-              readOnly
-              value={backupText}
-              className="w-full h-24 input-bg rounded p-3 text-left text-xs mb-4 opacity-70"
-              style={{ direction: 'ltr', resize: 'none' }}
-            ></textarea>
-            <div className="flex gap-2">
-              <button
-                onClick={handleCopyBackup}
-                className="w-1/2 bg-blue-500/20 text-blue-400 font-bold rounded px-3 py-2 border border-blue-500/50 hover:bg-blue-500 hover:text-white transition-colors text-sm"
-              >
-                نسخ الكود 📋
-              </button>
-              <button
-                onClick={handleDownloadBackupFile}
-                className="w-1/2 bg-blue-500 text-white font-bold rounded px-3 py-2 shadow-lg text-sm"
-              >
-                تنزيل ملف 📁
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* E. Import JSON Code Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-5 w-full max-w-sm relative flex flex-col border border-theme">
-            <button
-              onClick={() => setShowImportModal(false)}
-              className="absolute top-4 left-4 text-muted hover:text-main input-bg p-1 rounded-full border border-theme"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </button>
-            <h3 className="text-lg font-bold text-green-500 mb-2">استرجاع البيانات</h3>
-            <p className="text-xs text-muted mb-4">اختر ملف النسخة الاحتياطية الذي قمت بتنزيله، أو الصق الكود هنا.</p>
-            <textarea
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              placeholder="أو الصق الكود هنا..."
-              className="w-full h-24 input-bg rounded p-3 text-left text-xs mb-4"
-              style={{ direction: 'ltr', resize: 'none' }}
-            ></textarea>
-            
-            <input
-              type="file"
-              id="importFileInput"
-              accept=".txt,.json"
-              className="hidden"
-              onChange={handleFileUpload}
-            />
-            
-            <div className="flex gap-2">
-              <button
-                onClick={handleExecuteImport}
-                className="w-1/2 bg-green-500/20 text-green-400 font-bold rounded px-3 py-2 border border-green-500/50 hover:bg-green-500 hover:text-white transition-colors text-sm"
-              >
-                لصق واسترجاع 🔄
-              </button>
-              <button
-                onClick={() => document.getElementById('importFileInput')?.click()}
-                className="w-1/2 bg-green-500 text-white font-bold rounded px-3 py-2 shadow-lg text-sm"
-              >
-                رفع الملف 📁
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* F. Import confirmation */}
-      {importPreview && (
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="card-bg rounded-lg p-5 w-full max-w-sm border border-theme text-right">
-            <h3 className="text-lg font-bold text-green-500 mb-3">تأكيد الاسترجاع</h3>
-            <div className="space-y-1 text-sm mb-3">
-              <div>لاعيبة جديدة هتتضاف: <b className="text-success">{importPreview.newCount}</b></div>
-              <div>لاعيبة هتتغير لنسخة الملف: <b className="text-amber-400">{importPreview.changedCount}</b></div>
-              <div>زي ما هم: <b className="text-muted">{importPreview.unchangedCount}</b></div>
-              <div>مش موجودين في الملف (هيفضلوا زي ما هم): <b className="text-main">{importPreview.notInFileCount}</b></div>
-            </div>
-            <p className="text-[11px] text-muted mb-4 leading-relaxed">
-              قبل أي تغيير هتتعمل نسخة احتياطية أوتوماتيك. مفيش أي لاعب هيتمسح.
-            </p>
-            <div className="flex gap-2">
-              <button
-                disabled={importBusy}
-                onClick={handleConfirmImport}
-                className="w-1/2 bg-green-500 text-white font-bold rounded px-3 py-2 disabled:opacity-50"
-              >
-                {importBusy ? 'جاري...' : 'تأكيد الاسترجاع'}
-              </button>
-              <button
-                disabled={importBusy}
-                onClick={() => setImportPreview(null)}
-                className="w-1/2 input-bg font-bold rounded px-3 py-2 border border-theme"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* G. WhatsApp receipt after a payment */}
-      {receipt && (() => {
-        const rp = players.find(p => p.id === receipt.playerId);
-        if (!rp) return null;
-        const text = buildReceiptMessage(rp, receipt, appSettings);
-        const link = whatsAppLink(rp.phone, text);
-        return (
-          <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="card-bg rounded-lg p-5 w-full max-w-sm border border-theme text-right">
-              <h3 className="text-lg font-bold text-success mb-2">🧾 إيصال الدفع: {rp.name}</h3>
-              <pre className="input-bg rounded p-3 text-xs whitespace-pre-wrap font-sans border border-theme mb-4">{text}</pre>
-              <div className="flex gap-2">
-                {link ? (
-                  <a
-                    href={link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => setReceipt(null)}
-                    className="w-1/2 text-white font-bold rounded px-3 py-2 text-center"
-                    style={{ backgroundColor: '#16a34a' }}
-                  >
-                    إرسال واتساب 💬
-                  </a>
-                ) : (
-                  <div className="w-1/2 text-[11px] text-muted text-center self-center">مفيش رقم موبايل للاعب</div>
-                )}
-                <button onClick={() => setReceipt(null)} className="w-1/2 input-bg font-bold rounded px-3 py-2 border border-theme">
-                  قفل
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* B-G. Delete / backup / import / receipt dialogs */}
+      <AppModals
+        players={players}
+        appSettings={appSettings}
+        playerToDeleteId={playerToDeleteId}
+        setPlayerToDeleteId={setPlayerToDeleteId}
+        handleDeletePlayer={handleDeletePlayer}
+        showBackupModal={showBackupModal}
+        setShowBackupModal={setShowBackupModal}
+        backupText={backupText}
+        handleCopyBackup={handleCopyBackup}
+        handleDownloadBackupFile={handleDownloadBackupFile}
+        showImportModal={showImportModal}
+        setShowImportModal={setShowImportModal}
+        importText={importText}
+        setImportText={setImportText}
+        handleExecuteImport={handleExecuteImport}
+        handleFileUpload={handleFileUpload}
+        importPreview={importPreview}
+        setImportPreview={setImportPreview}
+        importBusy={importBusy}
+        handleConfirmImport={handleConfirmImport}
+        receipt={receipt}
+        setReceipt={setReceipt}
+      />
 
       {/* --- Floating Toast Notification Alert --- */}
       <div
