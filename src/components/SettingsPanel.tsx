@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import type { AppSettings } from '../types';
-import { currentGymRate, localToday, formatDate } from '../lib/subscription';
+import {
+  currentGymRate,
+  localToday,
+  formatDate,
+  DEFAULT_INACTIVE_DAYS,
+  DEFAULT_REMINDER_TEMPLATE,
+  DEFAULT_RECEIPT_TEMPLATE,
+} from '../lib/subscription';
+import { REMINDER_VARIABLES, RECEIPT_VARIABLES } from '../lib/messages';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -20,6 +28,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSave }
   const [editingTiers, setEditingTiers] = useState(false);
   const [threshold, setThreshold] = useState(String(settings.discountThreshold));
   const [tiers, setTiers] = useState(settings.discountTiers.map(t => ({ sessions: String(t.sessions), cost: String(t.cost) })));
+
+  const [editingAlerts, setEditingAlerts] = useState(false);
+  const [inactiveDays, setInactiveDays] = useState(String(settings.inactiveAfterDays ?? DEFAULT_INACTIVE_DAYS));
+  const [editingTexts, setEditingTexts] = useState(false);
+  const [reminderText, setReminderText] = useState(settings.waReminderTemplate || DEFAULT_REMINDER_TEMPLATE);
+  const [receiptText, setReceiptText] = useState(settings.waReceiptTemplate || DEFAULT_RECEIPT_TEMPLATE);
+
+  const saveAlerts = async () => {
+    const n = parseInt(inactiveDays, 10);
+    if (!Number.isFinite(n) || n < 1) return;
+    await onSave({ ...settings, inactiveAfterDays: n });
+    setEditingAlerts(false);
+  };
+
+  const saveTexts = async () => {
+    await onSave({ ...settings, waReminderTemplate: reminderText, waReceiptTemplate: receiptText });
+    setEditingTexts(false);
+  };
 
   const saveRate = async () => {
     const value = parseFloat(rateInput);
@@ -158,6 +184,94 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSave }
               </div>
             ))}
             <div className="text-[10px] text-muted">أي باقة مش في الجدول (زي الـ 10 حصص) بتتحسب نصيب الحصة × عدد الحصص.</div>
+          </div>
+        )}
+      </div>
+
+      {/* Alerts: days before a player counts as inactive */}
+      <div className="border-t border-theme/50 pt-3">
+        <div className="flex justify-between items-center">
+          <span className="text-xs text-muted font-bold">التنبيهات: "مش نشط" بعد كام يوم؟</span>
+          {!editingAlerts && (
+            <button
+              onClick={() => {
+                setInactiveDays(String(settings.inactiveAfterDays ?? DEFAULT_INACTIVE_DAYS));
+                setEditingAlerts(true);
+              }}
+              className="text-[11px] text-primary underline font-bold"
+            >
+              تعديل
+            </button>
+          )}
+        </div>
+        {editingAlerts ? (
+          <div className="flex gap-2 mt-2">
+            <input
+              type="number"
+              value={inactiveDays}
+              onChange={(e) => setInactiveDays(e.target.value)}
+              className="flex-1 input-bg rounded-md px-3 py-2 text-sm border border-theme"
+            />
+            <button onClick={saveAlerts} className="btn-primary px-3 py-2 rounded-md text-xs font-bold">حفظ</button>
+            <button onClick={() => setEditingAlerts(false)} className="input-bg px-3 py-2 rounded-md text-xs border border-theme">إلغاء</button>
+          </div>
+        ) : (
+          <div className="text-xl font-black text-main mt-1">{settings.inactiveAfterDays ?? DEFAULT_INACTIVE_DAYS} يوم</div>
+        )}
+      </div>
+
+      {/* WhatsApp texts */}
+      <div className="border-t border-theme/50 pt-3">
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-xs text-muted font-bold">رسايل الواتساب</span>
+          {!editingTexts && (
+            <button
+              onClick={() => {
+                setReminderText(settings.waReminderTemplate || DEFAULT_REMINDER_TEMPLATE);
+                setReceiptText(settings.waReceiptTemplate || DEFAULT_RECEIPT_TEMPLATE);
+                setEditingTexts(true);
+              }}
+              className="text-[11px] text-primary underline font-bold"
+            >
+              تعديل
+            </button>
+          )}
+        </div>
+        {editingTexts ? (
+          <div className="space-y-2">
+            <label className="text-[11px] text-muted block">تذكير بالدفع</label>
+            <textarea
+              value={reminderText}
+              onChange={(e) => setReminderText(e.target.value)}
+              rows={5}
+              className="w-full input-bg rounded-md px-3 py-2 text-sm border border-theme"
+            />
+            <div className="text-[10px] text-muted" dir="rtl">المتغيرات: {REMINDER_VARIABLES.join(' ')}</div>
+            <label className="text-[11px] text-muted block pt-1">إيصال بعد الدفع</label>
+            <textarea
+              value={receiptText}
+              onChange={(e) => setReceiptText(e.target.value)}
+              rows={5}
+              className="w-full input-bg rounded-md px-3 py-2 text-sm border border-theme"
+            />
+            <div className="text-[10px] text-muted" dir="rtl">المتغيرات: {RECEIPT_VARIABLES.join(' ')}</div>
+            <div className="flex gap-2 pt-1">
+              <button onClick={saveTexts} className="w-1/3 btn-primary py-2 rounded-md text-xs font-bold">حفظ</button>
+              <button
+                onClick={() => {
+                  setReminderText(DEFAULT_REMINDER_TEMPLATE);
+                  setReceiptText(DEFAULT_RECEIPT_TEMPLATE);
+                }}
+                className="w-1/3 input-bg py-2 rounded-md text-xs border border-theme"
+              >
+                النص الأصلي
+              </button>
+              <button onClick={() => setEditingTexts(false)} className="w-1/3 input-bg py-2 rounded-md text-xs border border-theme">إلغاء</button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-[11px] text-muted leading-relaxed">
+            التذكير مش بيكتب سعر اللاعب. بيكتب الاسم وتاريخ الانتهاء أو "خلصت حصصك" والحصص الزيادة.
           </div>
         )}
       </div>

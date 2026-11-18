@@ -23,7 +23,9 @@ import {
   deletePersonalWalletFromCloud,
   fetchInitialPersonalWalletFromSupabase,
   runWeeklyBackupIfDue,
+  uploadSafetySnapshot,
 } from './supabase';
+import { buildReceiptMessage, whatsAppLink, type ReceiptInfo } from './lib/messages';
 
 const MONTH_LOCKS_ID = 'sys_month_locks';
 import type { Player, HistoryEntry, ExpectedAttendee, PersonalWalletEntry, AppSettings, EndMode } from './types';
@@ -261,6 +263,17 @@ export const App: React.FC = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [backupText, setBackupText] = useState('');
   const [importText, setImportText] = useState('');
+  // Import preview (what will change) before anything is written
+  const [importPreview, setImportPreview] = useState<{
+    players: Player[];
+    newCount: number;
+    changedCount: number;
+    unchangedCount: number;
+    notInFileCount: number;
+  } | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  // WhatsApp receipt offered after a payment
+  const [receipt, setReceipt] = useState<ReceiptInfo | null>(null);
 
   // 1. Load mode configuration
   useEffect(() => {
@@ -948,6 +961,9 @@ export const App: React.FC = () => {
     const updatedList = await db.players.toArray();
     setPlayers(updatedList);
     triggerToast(isEdit ? "تم تعديل الاشتراك والدفعة بنجاح ✏️" : "تم تسجيل الدفع وتنشيط الاشتراك بنجاح ✅");
+    if (!isEdit) {
+      setReceipt({ playerId, amount: subData.paid, subType: subData.subType, date: history[history.length - 1].date });
+    }
   };
 
   // Pay only the extra sessions: records a "حصص زيادة" payment and clears the balance.
@@ -971,6 +987,7 @@ export const App: React.FC = () => {
     const updatedList = await db.players.toArray();
     setPlayers(updatedList);
     triggerToast(`تم تسجيل دفع ${extraDates.length} حصص زيادة (${amount} ج) ✅`);
+    setReceipt({ playerId, amount, subType: EXTRA_PAYMENT, date: entry.date });
   };
 
   // Settings (gym share per session + discount table), synced as a system record
@@ -1072,7 +1089,7 @@ export const App: React.FC = () => {
   };
 
   // Expenses management
-  const handleSaveExpense = async (desc: string, cost: number, date: string) => {
+  const handleSaveExpense = async (desc: string, cost: number, date: string, category?: string) => {
     let sys = await db.players.get('sys_expenses');
     if (!sys) {
       sys = { id: 'sys_expenses', isSystem: true, name: 'المصروفات العامة', history: [] };
@@ -1085,6 +1102,7 @@ export const App: React.FC = () => {
       date,
       timestamp: Date.now(),
       subType: 'مصروف',
+      category: category || undefined,
     };
 
     const updatedSys: Player = {
@@ -1295,6 +1313,9 @@ export const App: React.FC = () => {
         ? `تم تسجيل حضور اللاعب [${attendee.name}] اليوم بنجاح 🟢`
         : `تم تسجيل الحضور وتفعيل الاشتراك للاعب [${attendee.name}] ✅`
     );
+    if (!ATTEND_ONLY_TYPES.includes(attendee.subType) && player) {
+      setReceipt({ playerId: player.id, amount: attendee.paid || 0, subType: attendee.subType, date: attendee.date });
+    }
   };
 
   // Lock (close) a month. This ONLY marks the month as closed in a system record.
@@ -1470,28 +1491,74 @@ export const App: React.FC = () => {
     setShowImportModal(true);
   };
 
+  // Step 1: read the file/code and show what will change (nothing is written yet)
   const handleExecuteImport = async () => {
     if (!importText.trim()) {
       alert("الرجاء لصق الكود أولاً!");
       return;
     }
-    
     try {
       const parsed = JSON.parse(importText);
-      if (Array.isArray(parsed)) {
-        await db.players.clear();
-        await db.players.bulkPut(parsed);
-        if (navigator.onLine) {
-          await syncAllToCloud(parsed);
-        }
-        setPlayers(parsed);
-        triggerToast("تم استرجاع جميع بياناتك بنجاح! ✅");
-        setShowImportModal(false);
-      } else {
+      // Accept the manual export (array) and the weekly backup ({ players: [...] })
+      const list: Player[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.players) ? parsed.players : null;
+      if (!list || list.some(p => !p || !p.id)) {
         triggerToast("كود تالف وغير صحيح!", true);
+        return;
       }
+      const current = new Map((await db.players.toArray()).map(p => [String(p.id), p]));
+      const fileIds = new Set(list.map(p => String(p.id)));
+      let newCount = 0;
+      let changedCount = 0;
+      let unchangedCount = 0;
+      list.forEach(p => {
+        const cur = current.get(String(p.id));
+        if (!cur) newCount++;
+        else if (JSON.stringify(cur) !== JSON.stringify(p)) changedCount++;
+        else unchangedCount++;
+      });
+      const notInFileCount = [...current.values()].filter(p => !p.isSystem && !fileIds.has(String(p.id))).length;
+      setImportPreview({ players: list, newCount, changedCount, unchangedCount, notInFileCount });
     } catch {
       triggerToast("كود غير مكتمل أو منتهي الصلاحية!", true);
+    }
+  };
+
+  // Step 2 (after confirmation): automatic safety backup, then add/update only (nothing is deleted)
+  const handleConfirmImport = async () => {
+    if (!importPreview) return;
+    setImportBusy(true);
+    try {
+      const snap = await uploadSafetySnapshot('pre-import');
+      if (!snap.uploaded) {
+        // Cloud backup not possible: keep a copy on the device and download it
+        try {
+          localStorage.setItem('pre_import_backup', snap.json);
+        } catch {}
+        const blob = new Blob([snap.json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Backup_before_import_${getTodayDate()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      await db.players.bulkPut(importPreview.players);
+      if (navigator.onLine) {
+        await syncAllToCloud(importPreview.players);
+      }
+      setPlayers(await db.players.toArray());
+      triggerToast(
+        snap.uploaded
+          ? "تم الاسترجاع ✅ (اتعملت نسخة احتياطية على السحابة قبلها)"
+          : "تم الاسترجاع ✅ (النسخة الاحتياطية اتنزلت على الجهاز)"
+      );
+      setImportPreview(null);
+      setShowImportModal(false);
+    } finally {
+      setImportBusy(false);
     }
   };
 
@@ -1725,8 +1792,8 @@ export const App: React.FC = () => {
             
             <div className="text-[10px] sm:text-xs text-muted mt-3 flex justify-center gap-3 border-t border-theme/50 pt-2 font-bold">
               <span>إيرادات: <b className="text-success text-sm font-black">{monthBenefit.revenue} ج.م</b></span>
-              <span>جيم: <b className="text-danger text-sm font-black">{monthBenefit.cost} ج.م</b></span>
-              <span>مصروفات: <b className="text-orange-400 text-sm font-black">{monthBenefit.expenses} ج.م</b></span>
+              <span>نصيب الجيم/المكان: <b className="text-danger text-sm font-black">{monthBenefit.cost} ج.م</b></span>
+              <span>مصروفات تانية: <b className="text-orange-400 text-sm font-black">{monthBenefit.expenses} ج.م</b></span>
             </div>
           </div>
 
@@ -2165,6 +2232,75 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* F. Import confirmation */}
+      {importPreview && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="card-bg rounded-lg p-5 w-full max-w-sm border border-theme text-right">
+            <h3 className="text-lg font-bold text-green-500 mb-3">تأكيد الاسترجاع</h3>
+            <div className="space-y-1 text-sm mb-3">
+              <div>لاعيبة جديدة هتتضاف: <b className="text-success">{importPreview.newCount}</b></div>
+              <div>لاعيبة هتتغير لنسخة الملف: <b className="text-amber-400">{importPreview.changedCount}</b></div>
+              <div>زي ما هم: <b className="text-muted">{importPreview.unchangedCount}</b></div>
+              <div>مش موجودين في الملف (هيفضلوا زي ما هم): <b className="text-main">{importPreview.notInFileCount}</b></div>
+            </div>
+            <p className="text-[11px] text-muted mb-4 leading-relaxed">
+              قبل أي تغيير هتتعمل نسخة احتياطية أوتوماتيك. مفيش أي لاعب هيتمسح.
+            </p>
+            <div className="flex gap-2">
+              <button
+                disabled={importBusy}
+                onClick={handleConfirmImport}
+                className="w-1/2 bg-green-500 text-white font-bold rounded px-3 py-2 disabled:opacity-50"
+              >
+                {importBusy ? 'جاري...' : 'تأكيد الاسترجاع'}
+              </button>
+              <button
+                disabled={importBusy}
+                onClick={() => setImportPreview(null)}
+                className="w-1/2 input-bg font-bold rounded px-3 py-2 border border-theme"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* G. WhatsApp receipt after a payment */}
+      {receipt && (() => {
+        const rp = players.find(p => p.id === receipt.playerId);
+        if (!rp) return null;
+        const text = buildReceiptMessage(rp, receipt, appSettings);
+        const link = whatsAppLink(rp.phone, text);
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="card-bg rounded-lg p-5 w-full max-w-sm border border-theme text-right">
+              <h3 className="text-lg font-bold text-success mb-2">🧾 إيصال الدفع: {rp.name}</h3>
+              <pre className="input-bg rounded p-3 text-xs whitespace-pre-wrap font-sans border border-theme mb-4">{text}</pre>
+              <div className="flex gap-2">
+                {link ? (
+                  <a
+                    href={link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setReceipt(null)}
+                    className="w-1/2 text-white font-bold rounded px-3 py-2 text-center"
+                    style={{ backgroundColor: '#16a34a' }}
+                  >
+                    إرسال واتساب 💬
+                  </a>
+                ) : (
+                  <div className="w-1/2 text-[11px] text-muted text-center self-center">مفيش رقم موبايل للاعب</div>
+                )}
+                <button onClick={() => setReceipt(null)} className="w-1/2 input-bg font-bold rounded px-3 py-2 border border-theme">
+                  قفل
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* --- Floating Toast Notification Alert --- */}
       <div

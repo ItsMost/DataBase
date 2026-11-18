@@ -16,6 +16,7 @@ export interface HistoryEntry {
   coverFrom?: string;
   // "حصص زيادة" payment: the extra-session dates this payment settles.
   settledExtras?: string[];
+  category?: string; // expense type (sys_expenses entries only); missing = "تانية"
 }
 
 export type EndMode = 'sessions' | 'month';
@@ -27,6 +28,11 @@ export interface AppSettings {
   discountTiers: { sessions: number; cost: number }[];
   // Attendances before this date keep the old calculation (history unchanged).
   v2From?: string;
+  // --- Phase 3 (optional, defaults in getSettings) ---
+  inactiveAfterDays?: number; // after this many days without activity a player is "مش نشط"
+  waReminderTemplate?: string;
+  waReceiptTemplate?: string;
+  expenseCategories?: string[];
 }
 
 export interface Player {

@@ -12,7 +12,18 @@ import {
   Filler,
 } from 'chart.js';
 import type { Player, HistoryEntry, PersonalWalletEntry, AppSettings } from '../types';
-import { getSettings, analyzePlayer, gymRateAt, EXTRA_PAYMENT, SINGLE_SESSION, getSessionCount } from '../lib/subscription';
+import {
+  getSettings,
+  analyzePlayer,
+  gymRateAt,
+  localToday,
+  EXTRA_PAYMENT,
+  SINGLE_SESSION,
+  getSessionCount,
+  DEFAULT_PLACE,
+  OTHER_EXPENSE,
+  DEFAULT_EXPENSE_CATEGORIES,
+} from '../lib/subscription';
 import { SettingsPanel } from './SettingsPanel';
 
 ChartJS.register(
@@ -28,7 +39,7 @@ ChartJS.register(
 
 interface ProfileSectionProps {
   players: Player[];
-  onSaveExpense: (desc: string, cost: number, date: string) => Promise<void>;
+  onSaveExpense: (desc: string, cost: number, date: string, category?: string) => Promise<void>;
   onDeleteExpense: (timestamp: number) => Promise<void>;
   onExportCSV: () => void;
   onExportJSON: () => void;
@@ -75,6 +86,9 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   const [expDesc, setExpDesc] = useState('');
   const [expAmount, setExpAmount] = useState('');
   const [expDate, setExpDate] = useState(getTodayDate());
+  const [expCategory, setExpCategory] = useState(OTHER_EXPENSE);
+  const [newCategory, setNewCategory] = useState('');
+  const [showNewCategory, setShowNewCategory] = useState(false);
 
   // Profile Tab state: 'monthly' or 'daily' or 'wallet'
   const [subTab, setSubTab] = useState<'monthly' | 'daily' | 'wallet'>('monthly');
@@ -326,6 +340,8 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
 
     return {
       allTimeRev,
+      allTimeGymCost,
+      allTimeExtExp,
       totalOut,
       netProfit,
       monthlyStats,
@@ -338,6 +354,55 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   };
 
   const financials = calculateFinancials();
+
+  // --- Breakdowns (display only; totals stay the same as the report) ---
+  // Other expenses by type, and gym/place share by place, per month.
+  const breakdowns = (() => {
+    const expByCat: Record<string, Record<string, number>> = {};
+    const gymByPlace: Record<string, Record<string, number>> = {};
+    const add = (map: Record<string, Record<string, number>>, month: string, key: string, v: number) => {
+      if (!v) return;
+      map[month] ||= {};
+      map[month][key] = (map[month][key] || 0) + v;
+    };
+    players.forEach(p => {
+      if (p.isSystem) {
+        if (p.id !== 'sys_expenses') return;
+        p.history?.forEach(h => h.date && add(expByCat, h.date.slice(0, 7), h.category || OTHER_EXPENSE, h.cost || 0));
+        return;
+      }
+      p.history?.forEach(h => h.date && add(gymByPlace, h.date.slice(0, 7), h.place || DEFAULT_PLACE, h.cost || 0));
+      const a = analyzePlayer(p, settings);
+      p.attendance?.forEach(d => {
+        if (!d) return;
+        const info = a.attendance.get(d);
+        if (!info || !info.charge) return;
+        add(gymByPlace, d.slice(0, 7), info.sub?.place || a.currentSub?.place || DEFAULT_PLACE, info.charge);
+      });
+    });
+    const places = new Set<string>();
+    Object.values(gymByPlace).forEach(m => Object.keys(m).forEach(k => places.add(k)));
+    return { expByCat, gymByPlace, multiplePlaces: places.size > 1 };
+  })();
+
+  // Profit of the first `days` days of a month (from the daily stats, same numbers as the report)
+  const partialMonthProfit = (monthKey: string, days: number) =>
+    Object.entries(financials.dailyStats).reduce((sum, [dayKey, st]) => {
+      if (!dayKey.startsWith(monthKey + '-')) return sum;
+      return parseInt(dayKey.slice(8, 10), 10) <= days ? sum + st.profit : sum;
+    }, 0);
+  const todayKey = localToday();
+  const currentMonthKeyStr = todayKey.slice(0, 7);
+  const previousMonthKey = (monthKey: string) => {
+    const [y, m] = monthKey.split('-').map(Number);
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+  };
+  const daysInMonth = (monthKey: string) => {
+    const [y, m] = monthKey.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+  };
+
+  const expenseCategories = settings.expenseCategories || DEFAULT_EXPENSE_CATEGORIES;
 
   // --- Expenses lists computed for current month ---
   const currentMonth = new Date().getMonth();
@@ -357,12 +422,12 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   const handleSubmitExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(expAmount);
-    if (!expDesc.trim() || isNaN(amount) || amount <= 0) {
-      alert("الرجاء إدخال اسم المصروف والمبلغ بشكل صحيح!");
+    if (isNaN(amount) || amount <= 0) {
+      alert("الرجاء إدخال مبلغ المصروف بشكل صحيح!");
       return;
     }
 
-    await onSaveExpense(expDesc.trim(), amount, expDate || getTodayDate());
+    await onSaveExpense(expDesc.trim() || expCategory, amount, expDate || getTodayDate(), expCategory);
     setExpDesc('');
     setExpAmount('');
   };
@@ -708,8 +773,12 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
               <div className="text-success font-bold text-base">{financials.allTimeRev} ج.م</div>
             </div>
             <div className="input-bg p-3 rounded-lg border border-theme">
-              <div className="text-[10px] text-muted mb-1">إجمالي المصروفات</div>
-              <div className="text-danger font-bold text-base">{financials.totalOut} ج.م</div>
+              <div className="text-[10px] text-muted mb-1">نصيب الجيم / المكان</div>
+              <div className="text-danger font-bold text-base">{financials.allTimeGymCost} ج.م</div>
+            </div>
+            <div className="col-span-2 input-bg p-3 rounded-lg border border-theme">
+              <div className="text-[10px] text-muted mb-1">مصروفات تانية (مواصلات، أدوات، إيجار...)</div>
+              <div className="text-orange-400 font-bold text-base">{financials.allTimeExtExp} ج.م</div>
             </div>
             <div className="col-span-2 bg-primary/10 p-4 rounded-lg border border-primary relative overflow-hidden shadow-[0_0_15px_rgba(59,130,246,0.2)] mt-1">
               <div className="text-xs text-primary-light mb-1 font-bold">صافي الربح التاريخي</div>
@@ -733,15 +802,9 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
             <div className="flex gap-2 mb-3">
               <button
                 onClick={onExportJSON}
-                className="w-1/2 bg-blue-500/20 text-blue-400 border border-blue-500/50 py-2 rounded-lg font-bold hover:bg-blue-500 hover:text-white transition-all shadow-[0_0_10px_rgba(59,130,246,0.3)]"
+                className="w-full bg-blue-500/20 text-blue-400 border border-blue-500/50 py-2 rounded-lg font-bold hover:bg-blue-500 hover:text-white transition-all shadow-[0_0_10px_rgba(59,130,246,0.3)]"
               >
                 نسخ (Export)
-              </button>
-              <button
-                onClick={onImportJSON}
-                className="w-1/2 bg-green-500/20 text-green-400 border border-green-500/50 py-2 rounded-lg font-bold hover:bg-green-500 hover:text-white transition-all shadow-[0_0_10px_rgba(16,185,129,0.3)]"
-              >
-                لصق (Import)
               </button>
             </div>
             <button
@@ -755,18 +818,6 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
             </button>
           </div>
 
-          {/* 4. Deep Database Scanning & Recovery */}
-          <div className="card-bg rounded-lg p-5 border-t-2 border-red-500 relative">
-            <h2 className="text-lg font-bold text-red-500 mb-4 flex items-center">
-              ⚙️ الفحص العميق للطوارئ (Deep Scan)
-            </h2>
-            <button
-              onClick={onDeepRecover}
-              className="w-full bg-red-500/20 text-red-400 border border-red-500/50 py-3 rounded-lg font-bold hover:bg-red-500 hover:text-white transition-all shadow-[0_0_10px_rgba(239,68,68,0.3)]"
-            >
-              بحث واسترجاع الداتا القديمة 🔄
-            </button>
-          </div>
         </div>
       </div>
 
@@ -777,12 +828,60 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
           <h2 className="text-lg font-bold text-orange-500 mb-4 flex items-center">
             💸 المصروفات الخارجية والتشغيل
           </h2>
+          <div className="mb-2">
+            <label className="text-xs text-muted font-bold block mb-1">نوع المصروف</label>
+            <div className="flex gap-2">
+              <select
+                value={expCategory}
+                onChange={(e) => setExpCategory(e.target.value)}
+                className="flex-1 input-bg rounded-md px-3 py-2 text-sm border border-theme"
+              >
+                {expenseCategories.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setShowNewCategory(v => !v)}
+                className="input-bg border border-theme rounded-md px-3 text-xs font-bold text-orange-400 whitespace-nowrap"
+              >
+                + نوع جديد
+              </button>
+            </div>
+            {showNewCategory && (
+              <div className="flex gap-2 mt-2">
+                <input
+                  type="text"
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  placeholder="اسم النوع (مثال: إعلانات)"
+                  className="flex-1 input-bg rounded-md px-3 py-2 text-sm border border-theme"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const name = newCategory.trim();
+                    if (!name) return;
+                    if (!expenseCategories.includes(name)) {
+                      await onSaveSettings({ ...settings, expenseCategories: [...expenseCategories, name] });
+                    }
+                    setExpCategory(name);
+                    setNewCategory('');
+                    setShowNewCategory(false);
+                  }}
+                  className="bg-orange-500 text-white rounded-md px-3 text-xs font-bold"
+                >
+                  حفظ
+                </button>
+              </div>
+            )}
+          </div>
           <form onSubmit={handleSubmitExpense} className="flex gap-2 mb-3">
             <input
               type="text"
               value={expDesc}
               onChange={(e) => setExpDesc(e.target.value)}
-              placeholder="اسم المصروف (مثال: إعلانات)"
+              placeholder="وصف (اختياري)"
               className="w-1/2 input-bg rounded-md px-3 py-2 text-sm border border-theme"
             />
             <input
@@ -826,7 +925,9 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                   >
                     <div>
                       <span className="text-sm font-bold text-main block">{h.desc}</span>
-                      <span className="text-[10px] text-muted">{h.date}</span>
+                      <span className="text-[10px] text-muted">
+                        <span className="text-orange-400 font-bold">{h.category || OTHER_EXPENSE}</span> · {h.date}
+                      </span>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-orange-400 font-bold text-sm">{h.cost} ج</span>
@@ -927,25 +1028,46 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                 const prevKey = chronIdx > 0 ? financials.chronologicalKeys[chronIdx - 1] : null;
                 const prevStat = prevKey ? financials.monthlyStats[prevKey] : null;
 
+                // Current month isn't finished: compare the same number of days of the month before
+                const isRunningMonth = key === currentMonthKeyStr;
+                const fairPrevKey = previousMonthKey(key);
+                const fairDays = parseInt(todayKey.slice(8, 10), 10);
+                const fairPrevDays = Math.min(fairDays, daysInMonth(fairPrevKey));
+                const fair = isRunningMonth && financials.monthlyStats[fairPrevKey]
+                  ? {
+                      current: partialMonthProfit(key, fairDays),
+                      previous: partialMonthProfit(fairPrevKey, fairPrevDays),
+                      label: `أول ${fairDays} يوم قصاد أول ${fairPrevDays} يوم من ${monthNames[parseInt(fairPrevKey.slice(5, 7), 10) - 1]}`,
+                    }
+                  : null;
+                const baseProfit = fair ? fair.previous : prevStat?.profit ?? 0;
+                const compareProfit = fair ? fair.current : stat.profit;
+                const fairNote = fair ? (
+                  <span className="block text-[9px] text-muted font-normal mt-0.5">{fair.label}</span>
+                ) : null;
+
                 let percentChangeHtml = null;
-                if (prevStat && prevStat.profit > 0) {
-                  const change = ((stat.profit - prevStat.profit) / prevStat.profit) * 100;
+                if ((fair || prevStat) && baseProfit > 0) {
+                  const change = ((compareProfit - baseProfit) / baseProfit) * 100;
                   if (change > 0) {
                     percentChangeHtml = (
                       <div className="text-success text-[10px] sm:text-xs font-bold mt-1 bg-success/20 px-2 py-1 rounded inline-block border border-success/30">
                         🔼 +{change.toFixed(1)}% تحسن
+                        {fairNote}
                       </div>
                     );
                   } else if (change < 0) {
                     percentChangeHtml = (
                       <div className="text-danger text-[10px] sm:text-xs font-bold mt-1 bg-danger/20 px-2 py-1 rounded inline-block border border-danger/30">
                         🔽 {Math.abs(change).toFixed(1)}% تراجع
+                        {fairNote}
                       </div>
                     );
                   } else {
                     percentChangeHtml = (
                       <div className="text-muted text-[10px] sm:text-xs font-bold mt-1 input-bg border border-theme px-2 py-1 rounded inline-block">
                         ➖ استقرار
+                        {fairNote}
                       </div>
                     );
                   }
@@ -990,11 +1112,11 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                         <div className="text-success font-bold">{stat.revenue} ج</div>
                       </div>
                       <div>
-                        <div className="text-muted text-[10px] sm:text-xs mb-1">الجيم</div>
+                        <div className="text-muted text-[10px] sm:text-xs mb-1">نصيب الجيم/المكان</div>
                         <div className="text-danger font-bold">{stat.cost} ج</div>
                       </div>
                       <div>
-                        <div className="text-muted text-[10px] sm:text-xs mb-1">مصروفات</div>
+                        <div className="text-muted text-[10px] sm:text-xs mb-1">مصروفات تانية</div>
                         <div className="text-orange-400 font-bold">{stat.expenses || 0} ج</div>
                       </div>
                       <div>
@@ -1004,6 +1126,30 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                         </div>
                       </div>
                     </div>
+                    {(breakdowns.multiplePlaces && breakdowns.gymByPlace[key]) || breakdowns.expByCat[key] ? (
+                      <div className="mt-3 pt-2 border-t border-theme/40 space-y-1 text-[10px]">
+                        {breakdowns.multiplePlaces && breakdowns.gymByPlace[key] && (
+                          <div className="flex flex-wrap gap-1 items-center">
+                            <span className="text-muted font-bold">نصيب كل مكان:</span>
+                            {Object.entries(breakdowns.gymByPlace[key]).map(([place, v]) => (
+                              <span key={place} className="input-bg border border-theme rounded px-1.5 py-0.5 text-danger font-bold">
+                                {place}: {v} ج
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {breakdowns.expByCat[key] && (
+                          <div className="flex flex-wrap gap-1 items-center">
+                            <span className="text-muted font-bold">المصروفات التانية:</span>
+                            {Object.entries(breakdowns.expByCat[key]).map(([cat, v]) => (
+                              <span key={cat} className="input-bg border border-theme rounded px-1.5 py-0.5 text-orange-400 font-bold">
+                                {cat}: {v} ج
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })
@@ -1339,6 +1485,28 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
               الشهور المقفولة: {[...lockedMonths].sort().reverse().join('، ')}
             </div>
           )}
+        </div>
+
+        {/* Emergency tools (moved here from the backup section) */}
+        <div className="input-bg rounded-lg border border-red-500/30 p-4 mb-4">
+          <div className="font-black text-red-400 mb-1">🧰 أدوات الطوارئ</div>
+          <p className="text-[11px] text-muted mb-3 leading-relaxed">
+            قبل أي استرجاع بتتعمل نسخة احتياطية أوتوماتيك، وبيظهرلك كام لاعب هيتغير قبل التأكيد. مفيش لاعب بيتمسح.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={onImportJSON}
+              className="bg-green-500/20 text-green-400 border border-green-500/50 py-2 rounded-lg font-bold text-xs hover:bg-green-500 hover:text-white transition-all"
+            >
+              لصق (Import) 📥
+            </button>
+            <button
+              onClick={onDeepRecover}
+              className="bg-red-500/20 text-red-400 border border-red-500/50 py-2 rounded-lg font-bold text-xs hover:bg-red-500 hover:text-white transition-all"
+            >
+              الفحص العميق 🔄
+            </button>
+          </div>
         </div>
 
         <button

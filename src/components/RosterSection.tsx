@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { Player } from '../types';
 import { getSettings, analyzePlayer } from '../lib/subscription';
+import { buildReminderMessage, whatsAppLink } from '../lib/messages';
 
 interface RosterSectionProps {
   players: Player[];
@@ -127,27 +128,9 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
     clearForm();
   };
 
-  const handlePhoneFormat = (rawPhone?: string) => {
-    if (!rawPhone || !rawPhone.trim()) return '';
-    let formatted = rawPhone.trim().replace(/[\s-]/g, '');
-    if (formatted.startsWith('0')) {
-      formatted = '2' + formatted;
-    } else if (!formatted.startsWith('20') && !formatted.startsWith('+')) {
-      formatted = '20' + formatted;
-    }
-    return formatted.replace('+', '');
-  };
-
-  const getWhatsAppLink = (player: Player, isExpired: boolean, days: number) => {
-    const formattedPhone = handlePhoneFormat(player.phone);
-    if (!formattedPhone) return null;
-
-    if (isExpired) {
-      const msg = `أعتذر جداً بس النهاردة كانت آخر حصة في الشهر للاعب [#${player.number}] ${player.name} لتجديد الاشتراك برجاء التوجه لفرع النادي.`;
-      return `https://wa.me/${formattedPhone}?text=${encodeURIComponent(msg)}`;
-    }
-    return `https://wa.me/${formattedPhone}`;
-  };
+  // Reminder text comes from the editable template in settings (no player price in it)
+  const getWhatsAppLink = (player: Player, isExpired: boolean) =>
+    isExpired ? whatsAppLink(player.phone, buildReminderMessage(player, settings)) : whatsAppLink(player.phone);
 
   const settings = getSettings(players);
 
@@ -316,7 +299,7 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
             const statusDot = isCardActive ? '🟢 اشتراك ساري' : '🔴 غير مسدد/منتهي';
             const statusColor = isCardActive ? 'text-success' : 'text-danger';
             
-            const whatsappLink = getWhatsAppLink(player, expInfo.isExpired, expInfo.days);
+            const whatsappLink = getWhatsAppLink(player, expInfo.isExpired);
 
             // Compute statistics
             const totalAttendance = player.attendance ? player.attendance.length : 0;

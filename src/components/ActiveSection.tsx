@@ -11,6 +11,8 @@ import {
   DEFAULT_PLACE,
 } from '../lib/subscription';
 import { EndModePicker, GymCostField, PlaceField, usePlaceSuggestions } from './AccountingFields';
+import { buildReminderMessage, whatsAppLink } from '../lib/messages';
+import { diffDays, DEFAULT_INACTIVE_DAYS } from '../lib/subscription';
 
 interface ActiveSectionProps {
   players: Player[];
@@ -308,12 +310,37 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
   const monthlySubscribers = filteredSubscribers.filter(p => p.subType && p.subType !== 'حصة واحدة');
   const dailySubscribers = filteredSubscribers.filter(p => p.subType === 'حصة واحدة');
 
-  // Expiration Alerts: Filter players whose subscription is expired
-  const expiredPlayers = players.filter(p => {
-    if (p.isSystem || p.isDeleted || !p.subType) return false;
-    const exp = checkExpiration(p);
-    return exp.isExpired;
-  });
+  // Subscription alerts, split in three groups (shared engine, no money logic here)
+  const inactiveAfterDays = settings.inactiveAfterDays ?? DEFAULT_INACTIVE_DAYS;
+  const todayStr = getTodayDate();
+  const lastActivity = (p: Player): string => {
+    const a = analysisOf(p);
+    const dates = [
+      a.status.endDate || '',
+      ...(p.attendance || []),
+      ...(p.history || []).map(h => h.date),
+    ].filter(Boolean).sort();
+    return dates[dates.length - 1] || '';
+  };
+  const activePlayers = players.filter(p => !p.isSystem && !p.isDeleted);
+
+  // (2) "حضر زيادة وعليه فلوس": anyone with unpaid extra sessions, oldest first
+  const playersWithExtras = activePlayers
+    .filter(p => analysisOf(p).balance.extraCount > 0)
+    .sort((a, b) => (analysisOf(a).balance.oldestDate || '').localeCompare(analysisOf(b).balance.oldestDate || ''));
+  const outstandingGym = playersWithExtras.reduce((sum, p) => sum + analysisOf(p).balance.gymAdvanced, 0);
+
+  // Ended packages without extras: (1) needs renewal (recent) or (3) inactive (old)
+  const endedNoExtras = activePlayers
+    .filter(p => {
+      const a = analysisOf(p);
+      return a.status.hasSubscription && !a.status.isSingle && a.status.isExpired && a.balance.extraCount === 0;
+    })
+    .map(p => ({ player: p, idle: Math.max(0, diffDays(lastActivity(p), todayStr)) }));
+  const needsRenewal = endedNoExtras.filter(x => x.idle <= inactiveAfterDays).sort((a, b) => a.idle - b.idle);
+  const inactivePlayers = endedNoExtras.filter(x => x.idle > inactiveAfterDays).sort((a, b) => a.idle - b.idle);
+  const alertBadgeCount = needsRenewal.length + playersWithExtras.length;
+  const [showInactive, setShowInactive] = useState(false);
 
   const getTodaySessionNumberText = (player: Player) => {
     const info = analysisOf(player).attendance.get(getTodayDate());
@@ -322,11 +349,6 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
     return `الحصة رقم ${info.sessionNumber} من ${analysisOf(player).status.totalSessions || '-'}`;
   };
 
-  // Outstanding money: gym money the coach advanced for extra sessions, oldest first
-  const playersWithExtras = players
-    .filter(p => !p.isSystem && !p.isDeleted && analysisOf(p).balance.extraCount > 0)
-    .sort((a, b) => (analysisOf(a).balance.oldestDate || '').localeCompare(analysisOf(b).balance.oldestDate || ''));
-  const outstandingGym = playersWithExtras.reduce((sum, p) => sum + analysisOf(p).balance.gymAdvanced, 0);
   const payDialogPlayer = payDialogPlayerId ? players.find(p => p.id === payDialogPlayerId) : undefined;
 
   const filteredAttendedToday = players.filter(p => {
@@ -376,103 +398,141 @@ export const ActiveSection: React.FC<ActiveSectionProps> = ({
       return timeA.localeCompare(timeB);
     });
 
-  const handlePhoneFormat = (rawPhone?: string) => {
-    if (!rawPhone || !rawPhone.trim()) return '';
-    let formatted = rawPhone.trim().replace(/[\s-]/g, '');
-    if (formatted.startsWith('0')) {
-      formatted = '2' + formatted;
-    } else if (!formatted.startsWith('20') && !formatted.startsWith('+')) {
-      formatted = '20' + formatted;
-    }
-    return formatted.replace('+', '');
-  };
-
-  const getWhatsAppLink = (player: Player) => {
-    const formattedPhone = handlePhoneFormat(player.phone);
-    if (!formattedPhone) return null;
-    const msg = `أعتذر جداً بس النهاردة كانت آخر حصة في الشهر للاعب [#${player.number || '000'}] ${player.name} لتجديد الاشتراك برجاء التوجه لفرع النادي.`;
-    return `https://wa.me/${formattedPhone}?text=${encodeURIComponent(msg)}`;
-  };
+  // Payment reminder from the editable template (no player price in it)
+  const getWhatsAppLink = (player: Player) => whatsAppLink(player.phone, buildReminderMessage(player, settings));
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
       {/* Left Column: Alerts, Expected, Payment Forms (col-span-5) */}
       <div className="lg:col-span-5 space-y-6 lg:order-1">
-      {/* 1. Expiration Alerts Panel */}
-      {expiredPlayers.length > 0 && (
-        <div className="card-bg rounded-lg p-4 border border-danger/40 bg-danger/5 shadow-[0_0_15px_rgba(239,68,68,0.15)] relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-1.5 h-full bg-danger animate-pulse"></div>
-          <h3 className="text-sm font-bold text-danger mb-3 flex items-center gap-1.5 glow-text pr-2">
-            ⚠️ تنبيهات الاشتراكات المنتهية ({expiredPlayers.length})
-          </h3>
-          <div className="max-h-40 overflow-y-auto pr-1 space-y-2">
-            {expiredPlayers.map(p => {
-              const exp = checkExpiration(p);
-              const waLink = getWhatsAppLink(p);
-              return (
-                <div key={p.id} className="input-bg rounded p-2 flex justify-between items-center border border-danger/10 text-xs hover:border-danger/30 transition-all">
-                  <div className="text-right">
-                    <span className="font-bold text-main block text-xs">[#{p.number || '000'}] {p.name}</span>
-                    <span className="text-danger font-semibold mt-0.5 inline-block text-[10px]">منتهي من {exp.days} أيام ({p.subType})</span>
-                  </div>
-                  {waLink && (
-                    <a
-                      href={waLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="bg-danger/20 hover:bg-danger text-danger hover:text-white px-2 py-1.5 rounded border border-danger/30 hover:border-danger/60 transition-all flex items-center gap-1 font-bold shadow-sm whitespace-nowrap"
-                    >
-                      تذكير 💬
-                    </a>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* 1. Subscription alerts (three groups) */}
+      <div className="card-bg rounded-lg p-4 border border-danger/30 relative overflow-hidden">
+        <h3 className="text-sm font-bold text-danger mb-3 flex items-center gap-1.5 glow-text">
+          ⚠️ تنبيهات الاشتراكات
+          <span className="bg-danger text-white text-[10px] font-black px-2 py-0.5 rounded-full">{alertBadgeCount}</span>
+        </h3>
 
-      {/* Outstanding money: gym paid by the coach for extra sessions */}
-      <div className="card-bg rounded-lg p-4 border border-amber-500/40 bg-amber-500/5">
-        <h3 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-1.5">💸 الفلوس اللي برّه</h3>
-        <div className="grid grid-cols-2 gap-2 text-center mb-3">
-          <div className="input-bg rounded-lg p-2 border border-theme">
-            <div className="text-[10px] text-muted">دفعتها للجيم ولسه مرجعتش</div>
-            <div className="text-amber-400 font-black text-lg">{outstandingGym} ج</div>
+        {/* (1) Needs renewal */}
+        <div className="mb-3">
+          <div className="text-xs font-black text-danger mb-1.5">
+            🔁 محتاج يجدد ({needsRenewal.length})
+            <span className="text-muted font-normal mr-1">خلص من {inactiveAfterDays} يوم أو أقل ومحضرش بعدها</span>
           </div>
-          <div className="input-bg rounded-lg p-2 border border-theme">
-            <div className="text-[10px] text-muted">لاعيبة عليهم حصص زيادة</div>
-            <div className="text-amber-400 font-black text-lg">{playersWithExtras.length}</div>
-          </div>
-        </div>
-        {playersWithExtras.length === 0 ? (
-          <div className="text-[11px] text-muted text-center">مفيش حصص زيادة متأخرة ✅</div>
-        ) : (
-          <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-            {playersWithExtras.map(p => {
-              const b = analysisOf(p).balance;
-              return (
-                <div key={p.id} className="input-bg rounded p-2 flex justify-between items-center border border-amber-500/20 text-xs gap-2">
-                  <div className="text-right">
-                    <span className="font-bold text-main block">[#{p.number || '000'}] {p.name}</span>
-                    <span className="text-amber-400 text-[10px] font-bold">
-                      حضر {b.extraCount} حصص زيادة · من {formatDate(b.oldestDate || '')} · دفعت للجيم {b.gymAdvanced} ج
-                    </span>
+          {needsRenewal.length === 0 ? (
+            <div className="text-[11px] text-muted">مفيش ✅</div>
+          ) : (
+            <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+              {needsRenewal.map(({ player: p }) => {
+                const st = analysisOf(p).status;
+                const waLink = getWhatsAppLink(p);
+                return (
+                  <div key={p.id} className="input-bg rounded p-2 flex justify-between items-center border border-danger/10 text-xs gap-2">
+                    <div className="text-right">
+                      <span className="font-bold text-main block">[#{p.number || '000'}] {p.name}</span>
+                      <span className="text-danger text-[10px] font-semibold">
+                        {st.endMode === 'sessions' ? 'خلصت حصصه' : 'خلص'} من {st.days} أيام ({p.subType})
+                      </span>
+                    </div>
+                    <div className="flex gap-1">
+                      {waLink && (
+                        <a href={waLink} target="_blank" rel="noopener noreferrer"
+                          className="bg-danger/20 text-danger px-2 py-1.5 rounded border border-danger/30 font-bold whitespace-nowrap">
+                          تذكير 💬
+                        </a>
+                      )}
+                      <button onClick={() => startNormalRenewal(p)}
+                        className="bg-success/20 text-success px-2 py-1.5 rounded border border-success/30 font-bold whitespace-nowrap">
+                        تجديد ♻️
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => {
-                      setExtrasAmount('');
-                      setPayDialogPlayerId(p.id);
-                    }}
-                    className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-2 py-1.5 rounded font-bold whitespace-nowrap hover:bg-amber-500 hover:text-white transition-all"
-                  >
-                    دفع 💰
-                  </button>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* (2) Extra sessions with money owed (the coach paid the gym for them) */}
+        <div className="mb-3 border-t border-theme/40 pt-3">
+          <div className="text-xs font-black text-amber-400 mb-1">💸 حضر زيادة وعليه فلوس ({playersWithExtras.length})</div>
+          <div className="text-[11px] text-muted mb-1.5">
+            الفلوس اللي برّه: دفعت للجيم بدالهم <b className="text-amber-400">{outstandingGym} ج</b> ولسه مرجعتش
           </div>
-        )}
+          {playersWithExtras.length === 0 ? (
+            <div className="text-[11px] text-muted">مفيش حصص زيادة متأخرة ✅</div>
+          ) : (
+            <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+              {playersWithExtras.map(p => {
+                const b = analysisOf(p).balance;
+                const waLink = getWhatsAppLink(p);
+                return (
+                  <div key={p.id} className="input-bg rounded p-2 flex justify-between items-center border border-amber-500/20 text-xs gap-2">
+                    <div className="text-right">
+                      <span className="font-bold text-main block">[#{p.number || '000'}] {p.name}</span>
+                      <span className="text-amber-400 text-[10px] font-bold">
+                        {b.extraCount} حصص زيادة · من {formatDate(b.oldestDate || '')} · دفعت للجيم {b.gymAdvanced} ج
+                      </span>
+                    </div>
+                    <div className="flex gap-1">
+                      {waLink && (
+                        <a href={waLink} target="_blank" rel="noopener noreferrer"
+                          className="bg-amber-500/10 text-amber-400 px-2 py-1.5 rounded border border-amber-500/30 font-bold whitespace-nowrap">
+                          💬
+                        </a>
+                      )}
+                      <button
+                        onClick={() => {
+                          setExtrasAmount('');
+                          setPayDialogPlayerId(p.id);
+                        }}
+                        className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-2 py-1.5 rounded font-bold whitespace-nowrap"
+                      >
+                        دفع 💰
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* (3) Inactive: collapsed by default */}
+        <div className="border-t border-theme/40 pt-3">
+          <button
+            type="button"
+            onClick={() => setShowInactive(v => !v)}
+            className="w-full flex justify-between items-center text-xs font-black text-muted"
+          >
+            <span>💤 مش نشط ({inactivePlayers.length}) <span className="font-normal">أكتر من {inactiveAfterDays} يوم من غير حضور</span></span>
+            <span>{showInactive ? 'إخفاء ▲' : 'عرض ▼'}</span>
+          </button>
+          {showInactive && (
+            <div className="mt-2 max-h-48 overflow-y-auto space-y-1.5 pr-1">
+              {inactivePlayers.length === 0 ? (
+                <div className="text-[11px] text-muted">مفيش</div>
+              ) : (
+                inactivePlayers.map(({ player: p, idle }) => {
+                  const waLink = getWhatsAppLink(p);
+                  return (
+                    <div key={p.id} className="input-bg rounded p-2 flex justify-between items-center border border-theme text-xs gap-2 opacity-80">
+                      <div className="text-right">
+                        <span className="font-bold text-main block">[#{p.number || '000'}] {p.name}</span>
+                        <span className="text-muted text-[10px]">آخر نشاط من {idle} يوم ({p.subType})</span>
+                      </div>
+                      {waLink && (
+                        <a href={waLink} target="_blank" rel="noopener noreferrer"
+                          className="input-bg text-muted px-2 py-1.5 rounded border border-theme font-bold whitespace-nowrap">
+                          تذكير 💬
+                        </a>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {payDialogPlayer && (
