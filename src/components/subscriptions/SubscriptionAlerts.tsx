@@ -6,7 +6,7 @@ import { formatDate } from '../../lib/subscription';
 import type { ActiveSectionVM } from '../../hooks/useActiveSection';
 
 export const SubscriptionAlerts: React.FC<{ vm: ActiveSectionVM }> = ({ vm }) => {
-  const { onPayExtras, paid, analysisOf, setPayDialogPlayerId, extrasAmount, setExtrasAmount, startNormalRenewal, startFullRenewalWithExtras, inactiveAfterDays, playersWithExtras, outstandingGym, needsRenewal, inactivePlayers, alertBadgeCount, showInactive, setShowInactive, payDialogPlayer, getWhatsAppLink } = vm;
+  const { onPayExtras, analysisOf, setPayDialogPlayerId, extrasAmount, setExtrasAmount, startNormalRenewal, startFullRenewalWithExtras, inactiveAfterDays, playersWithExtras, outstandingGym, needsRenewal, inactivePlayers, alertBadgeCount, showInactive, setShowInactive, payDialogPlayer, getWhatsAppLink } = vm;
   return (
     <>
       {/* 1. Subscription alerts (three groups) */}

@@ -2,7 +2,6 @@
  * "Expected today" list: add, edit, register in one tap.
  */
 import React from 'react';
-import type { Player } from '../../types';
 import {
   suggestGymCost,
   isPackageType,
@@ -15,7 +14,7 @@ import { PACKAGE_OPTIONS, SINGLE_SESSION_LABEL, ATTEND_ONLY_MONTHLY } from '../.
 import type { ActiveSectionVM } from '../../hooks/useActiveSection';
 
 export const ExpectedTodayPanel: React.FC<{ vm: ActiveSectionVM }> = ({ vm }) => {
-  const { players, getTodayDate, expectedAttendees, onAddExpectedAttendee, onDeleteExpectedAttendee, onApplyExpectedAttendee, onSaveExpectedAttendee, allGroups, subType, paid, settings, placeSuggestions, cost, endMode, place, expName, setExpName, selectedExpPlayerId, setSelectedExpPlayerId, expGroup, setExpGroup, expPaid, setExpPaid, expSubType, setExpSubType, expTime, setExpTime, expCost, setExpCost, expCostTouched, setExpCostTouched, expEndMode, setExpEndMode, expPlace, setExpPlace, showExpDropdown, setShowExpDropdown, expDropdownRef, editingExpId, setEditingExpId, editingExpTime, setEditingExpTime, editingExpGroup, setEditingExpGroup, editingExpPaid, setEditingExpPaid, editingExpSubType, setEditingExpSubType, editingExpCost, setEditingExpCost, getHourlySummary, sortedExpected } = vm;
+  const { players, getTodayDate, expectedAttendees, onAddExpectedAttendee, onDeleteExpectedAttendee, onApplyExpectedAttendee, onSaveExpectedAttendee, allGroups, settings, placeSuggestions, expName, setExpName, selectedExpPlayerId, setSelectedExpPlayerId, expGroup, setExpGroup, expPaid, setExpPaid, expSubType, setExpSubType, expTime, setExpTime, expCost, setExpCost, expCostTouched, setExpCostTouched, expEndMode, setExpEndMode, expPlace, setExpPlace, showExpDropdown, setShowExpDropdown, expDropdownRef, editingExpId, setEditingExpId, editingExpTime, setEditingExpTime, editingExpGroup, setEditingExpGroup, editingExpPaid, setEditingExpPaid, editingExpSubType, setEditingExpSubType, editingExpCost, setEditingExpCost, getHourlySummary, sortedExpected } = vm;
   return (
     <>
       {/* 2. Expected Today Panel */}

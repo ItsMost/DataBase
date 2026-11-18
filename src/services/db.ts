@@ -55,7 +55,6 @@ export async function runMigration(): Promise<Player[]> {
       return await db.players.toArray();
     }
 
-    console.log("Migration Service: Initializing migration...");
     const mergedPlayers = new Map<string, Player>();
 
     // 2. Fetch data from old LocalStorage
@@ -127,10 +126,8 @@ export async function runMigration(): Promise<Player[]> {
     const finalPlayers = Array.from(mergedPlayers.values());
 
     if (finalPlayers.length > 0) {
-      console.log(`Migration Service: Migrating ${finalPlayers.length} players into Dexie...`);
       // Bulk insert into Dexie
       await db.players.bulkPut(finalPlayers);
-      console.log("Migration Service: Migration completed successfully! ✅");
       return finalPlayers;
     }
 

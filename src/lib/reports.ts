@@ -3,7 +3,13 @@
  * Locked by tests/real-data.test.ts and src/lib/__tests__/reports.test.ts.
  */
 import type { Player, AppSettings } from '../types';
-import { analyzePlayer, gymRateAt, DEFAULT_PLACE, OTHER_EXPENSE, SINGLE_SESSION, EXTRA_PAYMENT } from './subscription';
+import {
+  analyzePlayer,
+  DEFAULT_PLACE,
+  OTHER_EXPENSE,
+  SINGLE_SESSION,
+  EXTRA_PAYMENT,
+} from './subscription';
 
 export interface MonthStat {
   revenue: number;

@@ -10,7 +10,7 @@ import { localToday } from '../lib/dates';
 import type { AppContextValue } from './appContext';
 
 export function useSettings(ctx: AppContextValue) {
-  const { players, setPlayers, triggerToast } = ctx;
+  const { setPlayers, triggerToast } = ctx;
   const getTodayDate = localToday;
 
   // Settings (gym share per session + discount table), synced as a system record

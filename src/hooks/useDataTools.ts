@@ -45,7 +45,9 @@ export function useDataTools(ctx: AppContextValue) {
               }
             });
           }
-        } catch {}
+        } catch {
+          // not JSON: skip this key
+        }
       }
     }
 
@@ -85,7 +87,9 @@ export function useDataTools(ctx: AppContextValue) {
           recoveredMap.set(String(p.id), p);
         }
       });
-    } catch {}
+    } catch {
+      // old database not available: nothing to recover from it
+    }
 
     // 3. Keep newer records
     players.forEach(p => {
@@ -216,7 +220,9 @@ export function useDataTools(ctx: AppContextValue) {
         // Cloud backup not possible: keep a copy on the device and download it
         try {
           localStorage.setItem('pre_import_backup', snap.json);
-        } catch {}
+        } catch {
+          // storage full / blocked: the downloaded file below is the backup
+        }
         const blob = new Blob([snap.json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

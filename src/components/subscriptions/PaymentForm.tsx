@@ -2,7 +2,6 @@
  * Subscription & payment form (end mode, gym/place money, place).
  */
 import React from 'react';
-import type { Player } from '../../types';
 import { isPackageType, formatDate, SINGLE_SESSION } from '../../lib/subscription';
 import { EndModePicker, GymCostField, PlaceField } from '../AccountingFields';
 import { PACKAGE_OPTIONS, SINGLE_SESSION_LABEL } from '../../lib/constants';

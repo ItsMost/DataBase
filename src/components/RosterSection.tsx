@@ -52,26 +52,6 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
   
   const [formError, setFormError] = useState(false);
 
-  // Sync form with editing player
-  useEffect(() => {
-    if (editingPlayer) {
-      setName(editingPlayer.name || '');
-      setNumber(editingPlayer.number || '');
-      setBirthYear(editingPlayer.birthYear ? String(editingPlayer.birthYear) : '');
-      setGroup(editingPlayer.sport || '');
-      setClub(editingPlayer.club || '');
-      setPhone(editingPlayer.phone || '');
-      setPosition(editingPlayer.position || '');
-      setHeight(editingPlayer.height ? String(editingPlayer.height) : '');
-      setWeight(editingPlayer.weight ? String(editingPlayer.weight) : '');
-      setFat(editingPlayer.fat ? String(editingPlayer.fat) : '');
-      setMuscle(editingPlayer.muscle ? String(editingPlayer.muscle) : '');
-    } else {
-      clearForm();
-      setNextNumber();
-    }
-  }, [editingPlayer, players]);
-
   const setNextNumber = () => {
     if (editingPlayer) return;
     let maxNum = 0;
@@ -95,6 +75,30 @@ export const RosterSection: React.FC<RosterSectionProps> = ({
     setMuscle('');
     setFormError(false);
   };
+
+  // Sync form with editing player
+  useEffect(() => {
+    if (editingPlayer) {
+      // Prefilling the form from the player chosen for editing is intended here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setName(editingPlayer.name || '');
+      setNumber(editingPlayer.number || '');
+      setBirthYear(editingPlayer.birthYear ? String(editingPlayer.birthYear) : '');
+      setGroup(editingPlayer.sport || '');
+      setClub(editingPlayer.club || '');
+      setPhone(editingPlayer.phone || '');
+      setPosition(editingPlayer.position || '');
+      setHeight(editingPlayer.height ? String(editingPlayer.height) : '');
+      setWeight(editingPlayer.weight ? String(editingPlayer.weight) : '');
+      setFat(editingPlayer.fat ? String(editingPlayer.fat) : '');
+      setMuscle(editingPlayer.muscle ? String(editingPlayer.muscle) : '');
+    } else {
+      clearForm();
+      setNextNumber();
+    }
+    // Only when the edited player / list changes (not on every render of the helpers).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingPlayer, players]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

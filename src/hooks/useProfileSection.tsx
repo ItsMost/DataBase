@@ -3,7 +3,7 @@
  * Moved out of the component unchanged; the screen parts read what they need from it.
  */
 import React, { useState } from 'react';
-import type { Player, PersonalWalletEntry, AppSettings } from '../types';
+import type { Player, PersonalWalletEntry, AppSettings, HistoryEntry } from '../types';
 import {
   getSettings,
   analyzePlayer,
@@ -372,7 +372,7 @@ export function useProfileSection(props: ProfileSectionProps) {
         // Same classification as the reports (shared engine)
         const dayInfo = analyzePlayer(p, settings).attendance.get(selectedDayKey);
         const isMonthly = dayInfo?.kind === 'package';
-        const activeSub: any = dayInfo?.sub || null;
+        const activeSub: HistoryEntry | null = dayInfo?.sub || null;
 
         if (isMonthly && activeSub) {
           const sessionNumber = dayInfo?.sessionNumber ?? 1;

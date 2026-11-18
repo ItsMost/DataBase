@@ -90,7 +90,6 @@ export async function runWeeklyBackupIfDue(): Promise<string | null> {
       if (removeError) console.error('Backup: cleanup of old snapshots failed', removeError);
     }
 
-    console.log(`Backup: saved ${name} ✅`);
     return name;
   } catch (err) {
     console.error('Backup: unexpected error', err);

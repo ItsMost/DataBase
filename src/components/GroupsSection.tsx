@@ -1,4 +1,9 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, {
+  useState,
+  useMemo,
+  useRef,
+  useEffect,
+} from 'react';
 import type { Player, HistoryEntry } from '../types';
 
 interface GroupsSectionProps {
@@ -118,10 +123,6 @@ export const GroupsSection: React.FC<GroupsSectionProps> = ({
     await onMovePlayerToGroup(playerId, groupName);
     setPlayerSearch('');
     setShowPlayerDropdown(null);
-  };
-
-  const handleRemoveFromGroup = async (playerId: string) => {
-    await onMovePlayerToGroup(playerId, 'العام');
   };
 
   const totalPlayers = activePlayers.length;

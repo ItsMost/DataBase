@@ -41,7 +41,6 @@ export async function processSyncQueue(): Promise<boolean> {
     }
 
     updateSyncStatus('syncing');
-    console.log(`Sync Manager: Processing ${queue.length} pending offline operations...`);
 
     for (const item of queue) {
       let success = false;
@@ -138,7 +137,6 @@ export async function processSyncQueue(): Promise<boolean> {
       }
     }
 
-    console.log("Sync Manager: Queue processed completely and successfully. ✅");
     updateSyncStatus('online');
     isProcessingQueue = false;
     return true;
@@ -231,7 +229,7 @@ export async function fetchInitialDataFromSupabase(): Promise<Player[]> {
 
   updateSyncStatus('syncing');
   try {
-    let allData: any[] = [];
+    let allData: { player_data: Player }[] = [];
     let count = 0;
     const pageSize = 1000;
 
@@ -342,7 +340,7 @@ export async function fetchInitialExpectedAttendeesFromSupabase(): Promise<Expec
 
   updateSyncStatus('syncing');
   try {
-    let allData: any[] = [];
+    let allData: { attendee_data: ExpectedAttendee }[] = [];
     let count = 0;
     const pageSize = 1000;
 
@@ -407,11 +405,9 @@ export async function fetchInitialExpectedAttendeesFromSupabase(): Promise<Expec
 // 4. Set up window online/offline listeners
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    console.log("Network Status: Online. Retrying synchronization...");
     processSyncQueue();
   });
   window.addEventListener('offline', () => {
-    console.log("Network Status: Offline.");
     updateSyncStatus('offline');
   });
 }
@@ -474,7 +470,7 @@ export async function fetchInitialPersonalWalletFromSupabase(): Promise<Personal
 
   updateSyncStatus('syncing');
   try {
-    let allData: any[] = [];
+    let allData: { entry_data: PersonalWalletEntry }[] = [];
     let count = 0;
     const pageSize = 1000;
 

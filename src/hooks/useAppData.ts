@@ -21,7 +21,6 @@ import { localToday } from '../lib/dates';
 export type SyncStatus = 'online' | 'offline' | 'syncing';
 
 export function useAppData(activeTab: string) {
-  const getTodayDate = localToday;
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('offline');
   // Players database state
   const [players, setPlayers] = useState<Player[]>([]);
@@ -42,7 +41,7 @@ export function useAppData(activeTab: string) {
   // Trigger cleanup of "حصة واحدة" subscriptions if the day rolls over during active usage
   useEffect(() => {
     const runDailyCleanup = async () => {
-      const todayStr = getTodayDate();
+      const todayStr = localToday();
       // NOTE: automatic deduplication was removed. Duplicate names are only
       // reported in the roster tab; the coach decides what to delete.
       const cleanPlayers = await db.players.toArray();
@@ -72,7 +71,6 @@ export function useAppData(activeTab: string) {
       const allExpected = await db.expectedToday.toArray();
       const expiredExpected = allExpected.filter(att => att.date < todayStr);
       if (expiredExpected.length > 0) {
-        console.log(`Daily Cleanup (activeTab): Deleting ${expiredExpected.length} expired expected attendees.`);
         for (const att of expiredExpected) {
           await db.expectedToday.delete(att.id);
         }
@@ -105,10 +103,9 @@ export function useAppData(activeTab: string) {
 
       // Load expected attendees and filter out expired ones locally
       const allExpected = await db.expectedToday.toArray();
-      const todayStr = getTodayDate();
+      const todayStr = localToday();
       const expiredExpected = allExpected.filter(att => att.date < todayStr);
       if (expiredExpected.length > 0) {
-        console.log(`Startup Cleanup: Deleting ${expiredExpected.length} expired expected attendees.`);
         for (const att of expiredExpected) {
           await db.expectedToday.delete(att.id);
         }
@@ -204,7 +201,6 @@ export function useAppData(activeTab: string) {
           const activeSynced = syncedExpected.filter(att => att.date >= todayStr);
           const expiredSynced = syncedExpected.filter(att => att.date < todayStr);
           if (expiredSynced.length > 0) {
-            console.log(`Startup Sync Cleanup: Deleting ${expiredSynced.length} expired expected attendees from cloud.`);
             const expiredIds = expiredSynced.map(att => att.id);
             for (const id of expiredIds) {
               await db.expectedToday.delete(id);

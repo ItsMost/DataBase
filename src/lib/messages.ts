@@ -86,7 +86,7 @@ export interface ReceiptInfo {
 /** Receipt after a payment: amount + new end (date, or sessions for "بتخلص بالحصص"). */
 export function buildReceiptMessage(player: Player, receipt: ReceiptInfo, settings: AppSettings): string {
   const st = analyzePlayer(player, settings).status;
-  let validity = '';
+  let validity: string;
   let endDate = '-';
   if (receipt.subType === EXTRA_PAYMENT) {
     validity = 'الحصص الزيادة اتسددت ✅';

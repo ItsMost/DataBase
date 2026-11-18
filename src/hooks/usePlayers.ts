@@ -11,7 +11,7 @@ import { localToday } from '../lib/dates';
 import type { AppContextValue } from './appContext';
 
 export function usePlayers(ctx: AppContextValue) {
-  const { players, setPlayers, setExpectedAttendees, triggerToast, setEditingPlayer, playerToDeleteId, setPlayerToDeleteId } = ctx;
+  const { setPlayers, setExpectedAttendees, triggerToast, setEditingPlayer, playerToDeleteId, setPlayerToDeleteId } = ctx;
   const getTodayDate = localToday;
 
   // Save/Register Player

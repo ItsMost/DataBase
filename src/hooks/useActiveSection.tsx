@@ -12,7 +12,7 @@ import {
   SINGLE_SESSION,
   DEFAULT_PLACE,
 } from '../lib/subscription';
-import { usePlaceSuggestions } from '../components/AccountingFields';
+import { usePlaceSuggestions } from './usePlaceSuggestions';
 import { buildReminderMessage, whatsAppLink } from '../lib/messages';
 import { diffDays, DEFAULT_INACTIVE_DAYS } from '../lib/subscription';
 
@@ -100,10 +100,14 @@ export function useActiveSection(props: ActiveSectionProps) {
 
   useEffect(() => {
     if (payRequestPlayerId) {
+      // Form state follows the chosen player / request on purpose (prefill).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setExtrasAmount('');
       setPayDialogPlayerId(payRequestPlayerId);
       onPayRequestHandled?.();
     }
+    // Runs only when these inputs change; adding the helpers would re-run it and overwrite the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payRequestPlayerId]);
 
   // Custom attendance date state per player
@@ -156,6 +160,8 @@ export function useActiveSection(props: ActiveSectionProps) {
     if (selectedPlayerId) {
       const player = players.find(p => p.id === selectedPlayerId);
       if (player) {
+          // Form state follows the chosen player / request on purpose (prefill).
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setPlayerSearch(`[#${player.number || '000'}] ${player.name}`);
       }
     } else {
@@ -165,16 +171,24 @@ export function useActiveSection(props: ActiveSectionProps) {
 
   // Suggested gym/place money (rules live in the settings). The coach can override it.
   const gymRateNow = suggestGymCost(settings, SINGLE_SESSION, 0);
+  const discountKey = JSON.stringify(settings.discountTiers) + '|' + settings.discountThreshold;
   useEffect(() => {
     if (costTouched) return;
     const suggested = suggestGymCost(settings, subType, parseFloat(paid) || 0, startDate || getTodayDate());
+    // The suggestion refreshes until the coach types his own number.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCost(Math.max(0, suggested - absorbedGym));
-  }, [subType, paid, absorbedGym, costTouched, gymRateNow, JSON.stringify(settings.discountTiers), settings.discountThreshold]);
+    // Runs only when these inputs change; adding the helpers would re-run it and overwrite the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subType, paid, absorbedGym, costTouched, gymRateNow, discountKey]);
 
   useEffect(() => {
     if (expCostTouched) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setExpCost(suggestGymCost(settings, expSubType, parseFloat(expPaid) || 0));
-  }, [expSubType, expPaid, expCostTouched, gymRateNow, JSON.stringify(settings.discountTiers), settings.discountThreshold]);
+    // Runs only when these inputs change; adding the helpers would re-run it and overwrite the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expSubType, expPaid, expCostTouched, gymRateNow, discountKey]);
 
   // Pre-fill if a player is selected via Roster "+ دفع" or if we are editing
   useEffect(() => {
@@ -182,6 +196,8 @@ export function useActiveSection(props: ActiveSectionProps) {
       const player = players.find(p => p.id === selectedPlayerId);
       if (player && player.subType && editingMode === player.id) {
         const current = analysisOf(player).currentSub;
+          // Form state follows the chosen player / request on purpose (prefill).
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setSubType(player.subType);
         setStartDate(player.startDate || getTodayDate());
         setPaid(player.paid ? String(player.paid) : '');
@@ -197,6 +213,8 @@ export function useActiveSection(props: ActiveSectionProps) {
         setSubType(SINGLE_SESSION);
       }
     }
+    // Runs only when these inputs change; adding the helpers would re-run it and overwrite the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlayerId, editingMode]);
 
   const handleSubmitSub = async (e: React.FormEvent) => {
@@ -389,7 +407,7 @@ export function useActiveSection(props: ActiveSectionProps) {
       }
     });
     return Object.entries(counts)
-      .filter(([_, count]) => count > 0)
+      .filter(([, count]) => count > 0)
       .map(([hour, count]) => `${count} لاعبين (${hour})`)
       .join(' | ');
   };

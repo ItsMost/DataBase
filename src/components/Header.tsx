@@ -1,5 +1,11 @@
 import React, { useEffect, useState } from 'react';
 
+/** Chrome's "install app" event (not in the standard DOM types). */
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 interface HeaderProps {
   mode: string;
   setMode: (mode: string) => void;
@@ -11,12 +17,12 @@ export const Header: React.FC<HeaderProps> = ({
   setMode,
   syncStatus,
 }) => {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
-      setDeferredPrompt(e);
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -28,8 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
   const handleInstallApp = async () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`PWA installation outcome: ${outcome}`);
+    await deferredPrompt.userChoice;
     setDeferredPrompt(null);
   };
 

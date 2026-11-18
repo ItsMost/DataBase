@@ -12,14 +12,18 @@
  *
  * Pure functions only (no React, no database) so they can be unit-tested.
  */
-import type { Player, HistoryEntry, AppSettings, EndMode } from '../types';
+import type {
+  Player,
+  HistoryEntry,
+  AppSettings,
+  EndMode,
+} from '../types';
 
 import {
   SINGLE_SESSION,
   EXTRA_PAYMENT,
   SETTINGS_ID,
   EXPENSES_ID,
-  DEFAULT_PLACE,
   DEFAULT_EXPENSE_CATEGORIES,
   DEFAULT_INACTIVE_DAYS,
   DEFAULT_REMINDER_TEMPLATE,
@@ -29,7 +33,13 @@ import {
   DEFAULT_DISCOUNT_TIERS,
   ATTEND_ONLY_TYPES,
 } from './constants';
-import { localToday, diffDays, addDays, addOneMonth, formatDate } from './dates';
+import {
+  localToday,
+  diffDays,
+  addDays,
+  addOneMonth,
+  formatDate,
+} from './dates';
 
 // Re-exported so existing imports keep working; the single definitions live in constants.ts / dates.ts.
 export {

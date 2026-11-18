@@ -15,7 +15,7 @@ import { type ReceiptInfo } from './lib/messages';
 import type { Player } from './types';
 import { getSettings, analyzePlayer, computeMonthlyTotals } from './lib/subscription';
 import { MONTH_NAMES, GROUPS_CONFIG_ID, MONTH_LOCKS_ID } from './lib/constants';
-import { localToday, dateKey } from './lib/dates';
+import { localToday } from './lib/dates';
 import type { AppContextValue } from './hooks/appContext';
 import { useAppData } from './hooks/useAppData';
 import { usePlayers } from './hooks/usePlayers';
@@ -78,7 +78,6 @@ export const App: React.FC = () => {
 
   const getTodayDate = localToday;
 
-  const getFormattedDate = dateKey;
 
   // One expiry/status function for every tab (src/lib/subscription.ts)
   const appSettings = getSettings(players);
