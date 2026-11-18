@@ -9,9 +9,9 @@ import { DuplicateNamesAlert } from './components/DuplicateNamesAlert';
 import {
   db,
   runMigration,
-} from './db';
+} from './services/db';
+import { supabase } from './services/supabaseClient';
 import {
-  supabase,
   registerSyncStatusCallback,
   syncPlayerToCloud,
   fetchInitialDataFromSupabase,
@@ -22,9 +22,8 @@ import {
   syncPersonalWalletToCloud,
   deletePersonalWalletFromCloud,
   fetchInitialPersonalWalletFromSupabase,
-  runWeeklyBackupIfDue,
-  uploadSafetySnapshot,
-} from './supabase';
+} from './services/sync';
+import { runWeeklyBackupIfDue, uploadSafetySnapshot } from './services/backup';
 import { buildReceiptMessage, whatsAppLink, type ReceiptInfo } from './lib/messages';
 
 import type { Player, HistoryEntry, ExpectedAttendee, PersonalWalletEntry, AppSettings, EndMode } from './types';

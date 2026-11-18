@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { LoginScreen } from './components/LoginScreen';
-import { supabase, hasStoredSession, processSyncQueue } from './supabase';
+import { supabase, hasStoredSession } from './services/supabaseClient';
+import { processSyncQueue } from './services/sync';
 import './index.css';
 
 type GateState = 'checking' | 'in' | 'out';

@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Player, SyncAction, ExpectedAttendee, PersonalWalletEntry } from './types';
+import type { Player, SyncAction, ExpectedAttendee, PersonalWalletEntry } from '../types';
 
 class SystemOfflineDB extends Dexie {
   players!: Table<Player, string>;

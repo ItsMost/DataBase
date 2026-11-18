@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase } from '../supabase';
+import { supabase } from '../services/supabaseClient';
 
 /**
  * The coach logs in with a single code.
